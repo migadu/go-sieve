@@ -12,6 +12,7 @@ implementation in Go.
 - imap4flags ([RFC 5232])
 - variables ([RFC 5229])
 - relational ([RFC 5231])
+- vacation ([RFC 5230])
 
 ## Example
 
@@ -25,6 +26,6 @@ See ./cmd/sieve-run.
 
 [RFC 5228]: https://datatracker.ietf.org/doc/html/rfc5228
 [RFC 5229]: https://datatracker.ietf.org/doc/html/rfc5229
-[RFC 5232]: https://datatracker.ietf.org/doc/html/rfc5232
+[RFC 5230]: https://datatracker.ietf.org/doc/html/rfc5230
 [RFC 5231]: https://datatracker.ietf.org/doc/html/rfc5231
-
+[RFC 5232]: https://datatracker.ietf.org/doc/html/rfc5232

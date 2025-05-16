@@ -21,6 +21,7 @@ var supportedRequires = map[string]struct{}{
 	"imap4flags": {},
 	"variables":  {},
 	"relational": {},
+	"vacation":   {},
 }
 
 var (
@@ -48,6 +49,8 @@ func init() {
 		"removeflag": loadRemoveFlag,
 		// RFC 5229 (variables extension)
 		"set": loadSet,
+		// RFC 5230 (vacation extension)
+		"vacation": loadVacation,
 		// vnd.dovecot.testsuite
 		"test":             loadDovecotTest,
 		"test_set":         loadDovecotTestSet,

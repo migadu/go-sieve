@@ -73,4 +73,21 @@ func main() {
 	fmt.Println("fileinfo:", data.Mailboxes)
 	fmt.Println("keep:", data.ImplicitKeep || data.Keep)
 	fmt.Printf("flags: %s\n", strings.Join(data.Flags, " "))
+
+	// Print vacation responses
+	if len(data.VacationResponses) > 0 {
+		fmt.Println("vacation responses:")
+		for recipient, resp := range data.VacationResponses {
+			fmt.Printf("  To: %s\n", recipient)
+			fmt.Printf("  From: %s\n", resp.From)
+			fmt.Printf("  Subject: %s\n", resp.Subject)
+			fmt.Printf("  Body: %s\n", resp.Body)
+			fmt.Printf("  Handle: %s\n", resp.Handle)
+			fmt.Printf("  Days: %d\n", resp.Days)
+			fmt.Printf("  MIME: %v\n", resp.IsMime)
+			fmt.Println()
+		}
+	} else {
+		fmt.Println("vacation responses: none")
+	}
 }

@@ -61,6 +61,9 @@ type RuntimeData struct {
 	MatchVariables []string
 	Variables      map[string]string
 
+	// Vacation extension state
+	VacationResponses map[string]VacationResponse
+
 	// vnd.dovecot.testsuit state
 	testName        string
 	testFailMessage string // if set - test failed.
@@ -89,6 +92,14 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		testFailAt:      d.testFailAt,
 		testScript:      d.testScript,
 		testMaxNesting:  d.testMaxNesting,
+	}
+
+	// Copy vacation responses if they exist
+	if d.VacationResponses != nil {
+		newData.VacationResponses = make(map[string]VacationResponse, len(d.VacationResponses))
+		for k, v := range d.VacationResponses {
+			newData.VacationResponses[k] = v
+		}
 	}
 
 	copy(newData.RedirectAddr, d.RedirectAddr)
