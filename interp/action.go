@@ -14,6 +14,7 @@ func (c CmdStop) Execute(_ context.Context, _ *RuntimeData) error {
 type CmdFileInto struct {
 	Mailbox string
 	Flags   Flags
+	Copy    bool // RFC3894 - :copy modifier
 }
 
 func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
@@ -28,7 +29,12 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 		return nil
 	}
 	d.Mailboxes = append(d.Mailboxes, mailbox)
-	d.ImplicitKeep = false
+
+	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
+	if !c.Copy {
+		d.ImplicitKeep = false
+	}
+
 	if c.Flags != nil {
 		d.Flags = canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases)
 	}
@@ -37,6 +43,7 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 
 type CmdRedirect struct {
 	Addr string
+	Copy bool // RFC3894 - :copy modifier
 }
 
 func (c CmdRedirect) Execute(ctx context.Context, d *RuntimeData) error {
@@ -50,7 +57,11 @@ func (c CmdRedirect) Execute(ctx context.Context, d *RuntimeData) error {
 		return nil
 	}
 	d.RedirectAddr = append(d.RedirectAddr, addr)
-	d.ImplicitKeep = false
+
+	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
+	if !c.Copy {
+		d.ImplicitKeep = false
+	}
 
 	if len(d.RedirectAddr) > d.Script.opts.MaxRedirects {
 		return fmt.Errorf("too many actions")

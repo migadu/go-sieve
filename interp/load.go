@@ -22,6 +22,7 @@ var supportedRequires = map[string]struct{}{
 	"variables":  {},
 	"relational": {},
 	"vacation":   {},
+	"copy":       {}, // RFC3894 - :copy extension for redirect and fileinto
 }
 
 var (
