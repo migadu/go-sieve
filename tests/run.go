@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,13 @@ func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {
 	opts := sieve.DefaultOptions()
 	opts.Lexer.Filename = "inline"
 	opts.Interp.T = t
+	// Enable all extensions for Dovecot tests
+	opts.EnabledExtensions = []string{
+		"fileinto", "envelope", "encoded-character",
+		"comparator-i;octet", "comparator-i;ascii-casemap",
+		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
+		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+	}
 
 	script, err := sieve.Load(strings.NewReader(scriptText), opts)
 	if err != nil {
@@ -24,9 +32,18 @@ func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {
 
 	ctx := context.Background()
 
-	// Empty data.
-	data := sieve.NewRuntimeData(script, interp.DummyPolicy{},
-		interp.EnvelopeStatic{}, interp.MessageStatic{})
+	// Create data with proper envelope and message for vacation tests
+	env := interp.EnvelopeStatic{
+		From: "sender@example.com",
+		To:   "recipient@example.com",
+	}
+	
+	msg := interp.MessageStatic{
+		Header: make(textproto.MIMEHeader),
+		Size:   100,
+	}
+	
+	data := sieve.NewRuntimeData(script, interp.DummyPolicy{}, env, msg)
 
 	if baseDir == "" {
 		wd, err := os.Getwd()
@@ -54,6 +71,13 @@ func RunDovecotTestWithout(t *testing.T, path string, disabledTests []string) {
 	opts.Lexer.Filename = filepath.Base(path)
 	opts.Interp.T = t
 	opts.Interp.DisabledTests = disabledTests
+	// Enable all extensions for Dovecot tests
+	opts.EnabledExtensions = []string{
+		"fileinto", "envelope", "encoded-character",
+		"comparator-i;octet", "comparator-i;ascii-casemap",
+		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
+		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+	}
 
 	script, err := sieve.Load(bytes.NewReader(svScript), opts)
 	if err != nil {

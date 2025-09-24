@@ -20,6 +20,8 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 	fm := make(map[string]struct{})
 	for _, fl := range src {
 		for _, f := range strings.Split(fl, " ") {
+			// RFC 3501: Flags are case-insensitive.
+			f = strings.ToLower(f)
 			if fc, ok := aliases[f]; ok {
 				fm[fc] = struct{}{}
 			} else {
@@ -27,14 +29,14 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 			}
 		}
 	}
-	if remove != nil {
-		for _, fl := range remove {
-			for _, f := range strings.Split(fl, " ") {
-				if fc, ok := aliases[f]; ok {
-					delete(fm, fc)
-				} else {
-					delete(fm, f)
-				}
+	for _, fl := range remove {
+		for _, f := range strings.Split(fl, " ") {
+			// RFC 3501: Flags are case-insensitive.
+			f = strings.ToLower(f)
+			if fc, ok := aliases[f]; ok {
+				delete(fm, fc)
+			} else {
+				delete(fm, f)
 			}
 		}
 	}

@@ -10,116 +10,107 @@ import (
 )
 
 func TestVacation(t *testing.T) {
-	// Test basic vacation functionality using inline script
-	scriptText := `
-	require ["vacation"];
-	
-	# Test basic vacation command
-	test "Basic vacation" {
-		vacation "I'm on vacation.";
-		
-		if not exists "vacation-response" {
-			test_fail "No vacation response was added";
-		}
-		
-		if not header :contains "vacation-response.subject" "Automated reply" {
-			test_fail "Unexpected subject in vacation response";
-		}
-		
-		if not header :contains "vacation-response.body" "I'm on vacation." {
-			test_fail "Unexpected body in vacation response";
-		}
-	}
-	
-	# Test vacation command with all parameters
-	test "Vacation with parameters" {
-		vacation :days 14 :subject "Out of Office" :from "me@example.com" 
-			:addresses ["me@example.com", "me2@example.com"] 
-			:mime :handle "vacation-001" 
-			"I'm on vacation until next week.";
-		
-		if not exists "vacation-response" {
-			test_fail "No vacation response was added";
-		}
-		
-		if not header :contains "vacation-response.subject" "Out of Office" {
-			test_fail "Unexpected subject in vacation response";
-		}
-		
-		if not header :contains "vacation-response.body" "I'm on vacation until next week." {
-			test_fail "Unexpected body in vacation response";
-		}
-		
-		if not header :contains "vacation-response.from" "me@example.com" {
-			test_fail "Unexpected from in vacation response";
-		}
-	}
-	
-	# Test that no vacation response is sent to our own addresses
-	test "No vacation response to own addresses" {
-		# Set envelope.from to one of our addresses
-		test_set "envelope.from" "me@example.com";
-		
-		vacation :addresses ["me@example.com"] "I'm on vacation.";
-		
-		if exists "vacation-response" {
-			test_fail "Vacation response was added for our own address";
-		}
-	}
-	`
-
-	RunDovecotTestInline(t, "", scriptText)
-}
-
-// TestVacationDirectly tests the vacation functionality directly using the Go API
-func TestVacationDirectly(t *testing.T) {
-	ctx := context.Background()
-
-	// Test basic vacation command
-	script := `require ["vacation"];
-	
-	vacation "I'm on vacation.";
-	`
-
-	opts := sieve.DefaultOptions()
-	opts.Lexer.Filename = "inline"
-
-	parsedScript, err := sieve.Load(strings.NewReader(script), opts)
-	if err != nil {
-		t.Fatal(err)
+	testCases := []struct {
+		name              string
+		script            string
+		envFrom           string
+		expectResponse    bool
+		expectedSubject   string
+		expectedBody      string
+		expectedFrom      string
+		expectedHandle    string
+		expectedDays      int
+		expectedRecipient string
+	}{
+		{
+			name:              "BasicVacation",
+			script:            `require ["vacation"]; vacation "I'm on vacation.";`,
+			envFrom:           "sender@example.com",
+			expectResponse:    true,
+			expectedSubject:   "Automated reply",
+			expectedBody:      "I'm on vacation.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			name: "VacationWithParameters",
+			script: `require ["vacation"];
+				vacation :days 14 :subject "Out of Office" :from "me@example.com" 
+				:addresses ["me@example.com", "me2@example.com"] 
+				:handle "vacation-001" 
+				"I'm on vacation until next week.";`,
+			envFrom:           "sender@example.com",
+			expectResponse:    true,
+			expectedSubject:   "Out of Office",
+			expectedBody:      "I'm on vacation until next week.",
+			expectedFrom:      "me@example.com",
+			expectedHandle:    "vacation-001",
+			expectedDays:      14,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			name:           "NoVacationResponseToOwnAddresses",
+			script:         `require ["vacation"]; vacation :addresses ["sender@example.com", "other@example.com"] "Away.";`,
+			envFrom:        "sender@example.com",
+			expectResponse: false,
+		},
 	}
 
-	// Create runtime data with a static envelope
-	env := interp.EnvelopeStatic{
-		From: "sender@example.com",
-		To:   "recipient@example.com",
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
 
-	data := sieve.NewRuntimeData(parsedScript, interp.DummyPolicy{}, env, interp.MessageStatic{})
+			opts := sieve.DefaultOptions()
+			opts.EnabledExtensions = []string{"vacation"}
 
-	// Execute the script
-	err = parsedScript.Execute(ctx, data)
-	if err != nil {
-		t.Fatal(err)
-	}
+			parsedScript, err := sieve.Load(strings.NewReader(tc.script), opts)
+			if err != nil {
+				t.Fatalf("Failed to load script: %v", err)
+			}
 
-	// Check that a vacation response was added
-	if len(data.VacationResponses) != 1 {
-		t.Fatalf("Expected 1 vacation response, got %d", len(data.VacationResponses))
-	}
+			env := interp.EnvelopeStatic{
+				From: tc.envFrom,
+				To:   "recipient@example.com",
+			}
 
-	// Check the response details
-	resp, ok := data.VacationResponses["sender@example.com"]
-	if !ok {
-		t.Fatalf("No vacation response for sender@example.com")
-	}
-	if resp.Body != "I'm on vacation." {
-		t.Errorf("Expected body 'I'm on vacation.', got '%s'", resp.Body)
-	}
-	if resp.Subject != "Automated reply" {
-		t.Errorf("Expected subject 'Automated reply', got '%s'", resp.Subject)
-	}
-	if resp.Days != 7 {
-		t.Errorf("Expected days 7, got %d", resp.Days)
+			data := sieve.NewRuntimeData(parsedScript, interp.DummyPolicy{}, env, interp.MessageStatic{})
+
+			err = parsedScript.Execute(ctx, data)
+			if err != nil {
+				t.Fatalf("Script execution failed: %v", err)
+			}
+
+			if !tc.expectResponse {
+				if len(data.VacationResponses) != 0 {
+					t.Fatalf("Expected no vacation responses, got %d", len(data.VacationResponses))
+				}
+				return
+			}
+
+			if len(data.VacationResponses) != 1 {
+				t.Fatalf("Expected 1 vacation response, got %d", len(data.VacationResponses))
+			}
+
+			resp, ok := data.VacationResponses[tc.expectedRecipient]
+			if !ok {
+				t.Fatalf("Expected vacation response for %s", tc.expectedRecipient)
+			}
+
+			if resp.Subject != tc.expectedSubject {
+				t.Errorf("Expected subject %q, got %q", tc.expectedSubject, resp.Subject)
+			}
+			if resp.Body != tc.expectedBody {
+				t.Errorf("Expected body %q, got %q", tc.expectedBody, resp.Body)
+			}
+			if resp.From != tc.expectedFrom {
+				t.Errorf("Expected from %q, got %q", tc.expectedFrom, resp.From)
+			}
+			if resp.Handle != tc.expectedHandle {
+				t.Errorf("Expected handle %q, got %q", tc.expectedHandle, resp.Handle)
+			}
+			if resp.Days != tc.expectedDays {
+				t.Errorf("Expected days %d, got %d", tc.expectedDays, resp.Days)
+			}
+		})
 	}
 }

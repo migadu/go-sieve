@@ -30,7 +30,6 @@ func TestExtensionsVariablesQuoting(t *testing.T) {
 }
 
 func TestExtensionsVariablesRegex(t *testing.T) {
-	t.Skip("requires regex extension")
 	RunDovecotTest(t, filepath.Join("pigeonhole", "tests", "extensions", "variables", "regex.svtest"))
 }
 

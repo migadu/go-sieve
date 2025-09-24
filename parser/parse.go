@@ -176,6 +176,9 @@ func readTestList(s *lexer.Stream, nesting int, opts *Options) ([]Test, error) {
 			}
 			needTest = true
 		case lexer.TestListEnd:
+			if needTest {
+				return nil, s.Err("reading test list: expected identifier, got closing brace")
+			}
 			return res, nil
 		default:
 			return nil, s.Err("reading test list: expected identifier or comma or closing brace, got %v", tok)

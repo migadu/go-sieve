@@ -66,9 +66,6 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 	from := expandVars(d, c.From)
 	reason := expandVars(d, c.Reason)
 	handle := expandVars(d, c.Handle)
-	if handle == "" {
-		handle = "default"
-	}
 
 	addresses := expandVarsList(d, c.Addresses)
 
@@ -87,12 +84,6 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 		}
 	}
 
-	// Check if we've already sent an autoresponse to this sender recently
-	days := c.Days
-	if days <= 0 {
-		days = 7 // Default is 7 days
-	}
-
 	// In a real implementation, we would check if we've already sent an autoresponse
 	// to this sender recently, and we would send the autoresponse if allowed.
 	// For now, we'll just add the autoresponse to the runtime data.
@@ -108,8 +99,10 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 		Body:    reason,
 		IsMime:  c.Mime,
 		Handle:  handle,
-		Days:    days,
+		Days:    c.Days,
 	}
+
+	d.ImplicitKeep = false
 
 	return nil
 }

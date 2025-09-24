@@ -17,16 +17,19 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 			"all": {
 				MatchBool: func() {
 					loaded.AddressPart = All
+					loaded.AddressPartCnt++
 				},
 			},
 			"localpart": {
 				MatchBool: func() {
 					loaded.AddressPart = LocalPart
+					loaded.AddressPartCnt++
 				},
 			},
 			"domain": {
 				MatchBool: func() {
 					loaded.AddressPart = Domain
+					loaded.AddressPartCnt++
 				},
 			},
 		},
@@ -51,6 +54,11 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 
 	if err := loaded.setKey(s, key); err != nil {
 		return nil, err
+	}
+
+	// Check for duplicate address parts
+	if loaded.AddressPartCnt > 1 {
+		return nil, fmt.Errorf("multiple address-parts are not allowed")
 	}
 
 	return loaded, nil
@@ -184,6 +192,11 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 
 	if err := loaded.setKey(s, key); err != nil {
 		return nil, err
+	}
+
+	// Check if regex extension is required
+	if loaded.match == MatchRegex && !s.RequiresExtension("regex") {
+		return nil, fmt.Errorf("missing require 'regex'")
 	}
 
 	return loaded, nil

@@ -59,6 +59,12 @@ func (t *matcherTest) addSpecTags(s *Spec) *Spec {
 			t.matchCnt++
 		},
 	}
+	s.Tags["regex"] = SpecTag{
+		MatchBool: func() {
+			t.match = MatchRegex
+			t.matchCnt++
+		},
+	}
 	s.Tags["value"] = SpecTag{
 		NeedsValue:  true,
 		MinStrCount: 1,
@@ -138,6 +144,10 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 		return fmt.Errorf("non-numeric comparators cannot be used with :count")
 	}
 
+	if (t.match == MatchContains || t.match == MatchMatches) && t.comparator == ComparatorASCIINumeric {
+		return fmt.Errorf("numeric comparator cannot be used with :contains or :matches")
+	}
+
 	return nil
 }
 
@@ -149,7 +159,7 @@ func (t *matcherTest) countMatches(d *RuntimeData, value uint64) bool {
 	if !t.isCount() {
 		panic("countMatches can be called only with MatchCount matcher")
 	}
-	
+
 	for _, k := range t.key {
 		kNum, err := strconv.ParseUint(expandVars(d, k), 10, 64)
 		if err != nil {
@@ -176,12 +186,31 @@ func (t *matcherTest) tryMatch(d *RuntimeData, source string) (bool, error) {
 		} else {
 			key = expandVars(d, key)
 			ok, matches, err = testString(t.comparator, t.match, t.relational, source, expandVars(d, key))
+
+			// RFC 5231, Section 5.4:
+			// With the "i;ascii-numeric" comparator, a numeric comparison is
+			// performed.
+			if t.match == MatchValue && t.comparator == ComparatorASCIINumeric {
+				var lhs, rhs *uint64
+				if l, err := strconv.ParseUint(source, 10, 64); err == nil {
+					lhs = &l
+				}
+				if r, err := strconv.ParseUint(key, 10, 64); err == nil {
+					rhs = &r
+				}
+
+				ok = t.relational.CompareNumericValue(lhs, rhs)
+				// No match variables for :value
+				matches = nil
+				err = nil
+			}
+
 		}
 		if err != nil {
 			return false, err
 		}
 		if ok {
-			if t.match == MatchMatches {
+			if t.match == MatchMatches || t.match == MatchRegex {
 				d.MatchVariables = matches
 			}
 			return true, nil

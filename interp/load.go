@@ -23,6 +23,7 @@ var supportedRequires = map[string]struct{}{
 	"relational": {},
 	"vacation":   {},
 	"copy":       {}, // RFC3894 - :copy extension for redirect and fileinto
+	"regex":      {}, // draft-murchison-sieve-regex - regex match type
 }
 
 var (
@@ -92,10 +93,11 @@ func init() {
 	}
 }
 
-func LoadScript(cmdStream []parser.Cmd, opts *Options) (*Script, error) {
+func LoadScript(cmdStream []parser.Cmd, opts *Options, enabledExtensions []string) (*Script, error) {
 	s := &Script{
-		extensions: map[string]struct{}{},
-		opts:       opts,
+		extensions:        map[string]struct{}{},
+		enabledExtensions: enabledExtensions,
+		opts:              opts,
 	}
 
 	loadedCmds, err := LoadBlock(s, cmdStream)

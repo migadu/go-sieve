@@ -42,10 +42,10 @@ func decodeEncodedChars(s string) (string, error) {
 			return string(decoded)
 		}
 
-		cpString := strings.Split(normalizeWSP.Replace(match[10:len(match)-1]), " ")
+		cpString := strings.Fields(normalizeWSP.Replace(match[10 : len(match)-1]))
 		replacement := strings.Builder{}
 		replacement.Grow(len(cpString))
-		for _, part := range cpString {
+		for _, part := range cpString { // strings.Fields guarantees no empty parts
 			if part != "" {
 				value, err := strconv.ParseInt(part, 16, 32)
 				if err != nil {

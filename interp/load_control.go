@@ -32,9 +32,26 @@ func loadRequire(s *Script, pcmd parser.Cmd) (Cmd, error) {
 			continue
 		}
 
+		// Check if extension is supported by the library
 		if _, ok := supportedRequires[ext]; !ok {
 			return nil, fmt.Errorf("loadRequire: unsupported extension: %v", ext)
 		}
+
+		// Check if extension is enabled in configuration
+		if s.enabledExtensions == nil {
+			return nil, fmt.Errorf("extension '%s' is not supported", ext)
+		}
+		enabled := false
+		for _, enabledExt := range s.enabledExtensions {
+			if enabledExt == ext {
+				enabled = true
+				break
+			}
+		}
+		if !enabled {
+			return nil, fmt.Errorf("extension '%s' is not supported", ext)
+		}
+
 		s.extensions[ext] = struct{}{}
 	}
 	return nil, nil

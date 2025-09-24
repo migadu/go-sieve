@@ -54,29 +54,14 @@ func (r Relational) CompareNumericValue(lhs, rhs *uint64) bool {
 
 	switch r {
 	case RelGreaterThan:
-		if lhs == nil {
-			if rhs == nil {
-				return false
-			}
-			return true
+		if rhs == nil { // rhs is infinity
+			return false // nothing is > infinity
 		}
-		if rhs == nil {
-			return false
-		}
-		return *lhs > *rhs
+		return lhs == nil || *lhs > *rhs // lhs is infinity or greater
 	case RelGreaterOrEqual:
 		return !RelLessThan.CompareNumericValue(lhs, rhs)
 	case RelLessThan:
-		if rhs == nil {
-			if lhs == nil {
-				return false
-			}
-			return true
-		}
-		if lhs == nil {
-			return false
-		}
-		return *lhs < *rhs
+		return RelGreaterThan.CompareNumericValue(rhs, lhs)
 	case RelLessOrEqual:
 		return !RelGreaterThan.CompareNumericValue(lhs, rhs)
 	case RelEqual:

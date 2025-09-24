@@ -3,10 +3,21 @@ package interp
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/emersion/go-message/mail"
 )
+
+// stripRFC2822Comments removes RFC 2822 comments (text in parentheses) from address strings
+// This allows parsing addresses like "tss(no spam)@fi.iki" -> "tss@fi.iki" 
+func stripRFC2822Comments(addr string) string {
+	// Simple regex to remove text in parentheses
+	// This is a basic implementation - RFC 2822 comment parsing is complex
+	// but this handles the common case in the test
+	commentRegex := regexp.MustCompile(`\([^)]*\)`)
+	return strings.TrimSpace(commentRegex.ReplaceAllString(addr, ""))
+}
 
 type Test interface {
 	Check(ctx context.Context, d *RuntimeData) (bool, error)
@@ -15,8 +26,9 @@ type Test interface {
 type AddressTest struct {
 	matcherTest
 
-	AddressPart AddressPart
-	Header      []string
+	AddressPart    AddressPart
+	AddressPartCnt int // Counter to detect duplicate address parts
+	Header         []string
 }
 
 var allowedAddrHeaders = map[string]struct{}{
@@ -72,10 +84,87 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			return false, err
 		}
 
-		for _, value := range values {
-			addrList, err := mail.ParseAddressList(value)
+		// Handle case where header exists but has no values (empty header)  
+		if len(values) == 0 {
+			if a.isCount() {
+				// No addresses to count for this header
+				continue
+			}
+			
+			// Try to match against empty string for empty header
+			ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
 			if err != nil {
-				return false, nil
+				return false, err
+			}
+			if ok {
+				return true, nil
+			}
+			continue
+		}
+
+		for _, value := range values {
+			// Strip RFC 2822 comments before parsing
+			cleanValue := stripRFC2822Comments(value)
+			
+			// Check for invalid angle bracket usage (bare angle brackets without display name)
+			// Pattern like "<email@domain.com>" without preceding display name is invalid
+			trimmed := strings.TrimSpace(cleanValue)
+			hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") && 
+			   strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
+			
+			if hasBareAngleBrackets {
+				// Bare angle brackets are invalid for address parsing, but for :all we can match literally
+				if a.isCount() {
+					// For count mode, invalid addresses don't count
+					continue
+				}
+				
+				// Try literal matching against the invalid address format
+				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
+				if err != nil {
+					return false, err
+				}
+				if ok {
+					return true, nil
+				}
+				continue
+			}
+			
+			addrList, err := mail.ParseAddressList(cleanValue)
+			if err != nil {
+				// If parsing fails, try matching against the literal header value
+				if a.isCount() {
+					// For count mode, non-parseable addresses don't count
+					continue
+				}
+				
+				// For failed address parsing, match against the literal value
+				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
+				if err != nil {
+					return false, err
+				}
+				if ok {
+					return true, nil
+				}
+				continue
+			}
+
+			// Handle empty address list (empty header value)
+			if len(addrList) == 0 {
+				if a.isCount() {
+					// No addresses to count
+					continue
+				}
+				
+				// Try to match against empty string
+				ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
+				if err != nil {
+					return false, err
+				}
+				if ok {
+					return true, nil
+				}
+				continue
 			}
 
 			for _, addr := range addrList {
@@ -157,6 +246,20 @@ func (e EnvelopeTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 		default:
 			return false, fmt.Errorf("envelope: unsupported envelope-part: %v", field)
 		}
+		
+		// For envelope addresses (from/to), we need to validate them first
+		// If the address is syntactically invalid, envelope tests should not match
+		// Note: auth is not an address, so don't validate it
+		fieldName := strings.ToLower(expandVars(d, field))
+		if value != "" && (fieldName == "from" || fieldName == "to") {
+			// Try to parse as envelope address to check validity
+			_, err := parseEnvelopeAddress(value)
+			if err != nil {
+				// Invalid envelope address - should not match anything
+				continue
+			}
+		}
+		
 		if e.isCount() {
 			if value != "" {
 				entryCount++
@@ -189,10 +292,10 @@ func (e ExistsTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			return false, err
 		}
 		if len(values) == 0 {
-			return false, nil
+			return false, nil // Return false if ANY header is missing
 		}
 	}
-	return true, nil
+	return true, nil // Return true only if ALL headers exist
 }
 
 type FalseTest struct{}

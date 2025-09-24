@@ -18,6 +18,102 @@ import (
 
 const DovecotTestExtension = "vnd.dovecot.testsuite"
 
+// parseEnvelopeAddress parses RFC 5321 envelope addresses
+// Returns the cleaned address and an error if the syntax is invalid
+func parseEnvelopeAddress(addr string) (string, error) {
+	// Handle empty address
+	if addr == "" {
+		return "", nil
+	}
+	
+	// Handle null reverse path <> 
+	if addr == "<>" {
+		return "", nil
+	}
+	
+	// Must be in angle brackets for valid envelope address
+	if !strings.HasPrefix(addr, "<") || !strings.HasSuffix(addr, ">") {
+		// Some addresses might not have brackets - validate basic syntax
+		if !strings.Contains(addr, "@") && addr != "MAILER-DAEMON" {
+			return "", fmt.Errorf("invalid envelope address syntax: %s", addr)
+		}
+		if strings.HasSuffix(addr, "@") && addr != "MAILER-DAEMON@" {
+			return "", fmt.Errorf("invalid envelope address syntax: missing domain")
+		}
+		if strings.HasPrefix(addr, "@") {
+			return "", fmt.Errorf("invalid envelope address syntax: missing local part")
+		}
+		return addr, nil
+	}
+	
+	// Remove angle brackets
+	inner := addr[1 : len(addr)-1]
+	
+	// Handle source route: <@host1,@host2:user@domain>
+	if strings.Contains(inner, ":") {
+		// Check for malformed source routes
+		parts := strings.SplitN(inner, ":", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid source route syntax")
+		}
+		
+		sourceRoute := parts[0]
+		actualAddr := parts[1]
+		
+		// Validate source route format: must start with @ and be comma-separated
+		if !strings.HasPrefix(sourceRoute, "@") {
+			return "", fmt.Errorf("invalid source route: must start with @")
+		}
+		
+		// Additional validation: source route can't contain @ without proper comma separation
+		// Invalid: @host1@host2  Valid: @host1,@host2
+		if strings.Count(sourceRoute, "@") > strings.Count(sourceRoute, ",")+1 {
+			return "", fmt.Errorf("invalid source route: malformed host list")
+		}
+		
+		// Split by comma and validate each host
+		hosts := strings.Split(sourceRoute, ",")
+		for _, host := range hosts {
+			host = strings.TrimSpace(host)
+			if !strings.HasPrefix(host, "@") || len(host) < 2 {
+				return "", fmt.Errorf("invalid source route host: %s", host)
+			}
+			// Each host component should have exactly one @
+			if strings.Count(host, "@") != 1 {
+				return "", fmt.Errorf("invalid source route host format: %s", host)
+			}
+			// Basic hostname validation - no empty domains, no consecutive dots
+			hostName := host[1:]
+			if hostName == "" || strings.Contains(hostName, "..") || strings.HasPrefix(hostName, ".") || strings.HasSuffix(hostName, ".") {
+				return "", fmt.Errorf("invalid hostname in source route: %s", hostName)
+			}
+		}
+		
+		// Return the actual address, ignoring source route
+		return actualAddr, nil
+	}
+	
+	// Regular address validation
+	if inner == "MAILER-DAEMON" {
+		return inner, nil
+	}
+	
+	// Check for basic syntax errors
+	if strings.Count(inner, "@") != 1 {
+		if strings.Count(inner, "@") == 0 {
+			return "", fmt.Errorf("invalid envelope address: missing @")
+		}
+		return "", fmt.Errorf("invalid envelope address: multiple @")
+	}
+	
+	parts := strings.SplitN(inner, "@", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("invalid envelope address: empty local part or domain")
+	}
+	
+	return inner, nil
+}
+
 type CmdDovecotTest struct {
 	TestName string
 	Cmds     []Cmd
@@ -107,19 +203,27 @@ func (c CmdDovecotTestSet) Execute(_ context.Context, d *RuntimeData) error {
 			Header: msgHdr,
 		}
 	case "envelope.from":
-		value = strings.TrimSuffix(strings.TrimPrefix(value, "<"), ">")
+		parsedAddr, err := parseEnvelopeAddress(value)
+		if err != nil {
+			// For invalid addresses, store the original value so envelope tests can detect invalidity
+			parsedAddr = value
+		}
 
 		d.Envelope = EnvelopeStatic{
-			From: value,
+			From: parsedAddr,
 			To:   d.Envelope.EnvelopeTo(),
 			Auth: d.Envelope.AuthUsername(),
 		}
 	case "envelope.to":
-		value = strings.TrimSuffix(strings.TrimPrefix(value, "<"), ">")
+		parsedAddr, err := parseEnvelopeAddress(value)
+		if err != nil {
+			// For invalid addresses, store the original value so envelope tests can detect invalidity
+			parsedAddr = value
+		}
 
 		d.Envelope = EnvelopeStatic{
 			From: d.Envelope.EnvelopeFrom(),
-			To:   value,
+			To:   parsedAddr,
 			Auth: d.Envelope.AuthUsername(),
 		}
 	case "envelope.auth":
@@ -167,7 +271,7 @@ func (t TestDovecotCompile) Check(_ context.Context, d *RuntimeData) (bool, erro
 
 	script, err := LoadScript(cmds, &Options{
 		MaxRedirects: d.Script.opts.MaxRedirects,
-	})
+	}, nil)
 	if err != nil {
 		return false, nil
 	}

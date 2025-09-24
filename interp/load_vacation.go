@@ -15,7 +15,9 @@ func loadVacation(s *Script, pcmd parser.Cmd) (Cmd, error) {
 		return nil, parser.ErrorAt(pcmd.Position, "missing require 'vacation'")
 	}
 
-	cmd := CmdVacation{}
+	cmd := CmdVacation{
+		Days: 7, // Default value as per RFC 5230
+	}
 	err := LoadSpec(s, &Spec{
 		Tags: map[string]SpecTag{
 			"days": {

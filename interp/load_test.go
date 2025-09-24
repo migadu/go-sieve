@@ -47,8 +47,14 @@ func testCmdLoader(t *testing.T, s *Script, in string, out []Cmd) {
 }
 
 func TestLoadBlock(t *testing.T) {
+	// Enable all extensions for testing
+	allExtensions := make([]string, 0, len(supportedRequires))
+	for ext := range supportedRequires {
+		allExtensions = append(allExtensions, ext)
+	}
 	s := &Script{
-		extensions: supportedRequires,
+		extensions:        supportedRequires,
+		enabledExtensions: allExtensions,
 	}
 	testCmdLoader(t, s, `require ["envelope"];`, []Cmd{})
 	testCmdLoader(t, s, `if true { }`, []Cmd{CmdIf{
@@ -67,6 +73,7 @@ if envelope :is "from" "test@example.org" {
 					comparator: ComparatorASCIICaseMap,
 					match:      MatchIs,
 					key:        []string{"test@example.org"},
+					matchCnt:   1,
 				},
 				AddressPart: All,
 				Field:       []string{"from"},

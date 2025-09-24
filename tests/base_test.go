@@ -22,15 +22,7 @@ func TestControlStop(t *testing.T) {
 }
 
 func TestTestAddress(t *testing.T) {
-	RunDovecotTestWithout(t, filepath.Join("pigeonhole", "tests", "test-address.svtest"),
-		[]string{
-			// test_fail at 85:3 called: failed to ignore comment in address
-			// go-sieve address parser does not remove comments.
-			"Basic functionality",
-			// test_fail at 458:3 called: :localpart matched invalid UTF-8 address
-			// FIXME: Not sure what is wrong here. UTF-8 looks valid?
-			"Invalid addresses",
-		})
+	RunDovecotTest(t, filepath.Join("pigeonhole", "tests", "test-address.svtest"))
 }
 
 func TestTestAllof(t *testing.T) {

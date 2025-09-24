@@ -13,16 +13,15 @@ func TestCompile(t *testing.T) {
 // tests to check whether any invalid scripts are not loaded as valid.
 
 func TestCompileErrors(t *testing.T) {
-	t.Skip("FIXME: Non-conforming compilation")
 	// Stripped test_error calls from errors.svtest.
 	RunDovecotTestInline(t, filepath.Join("pigeonhole", "tests", "compile"), `
 require "vnd.dovecot.testsuite";
-test "Lexer errors (FIXME: count only)" {
+test "Lexer errors" {
 	if test_script_compile "errors/lexer.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Parser errors (FIXME: count only)" {
+test "Parser errors" {
 	if test_script_compile "errors/parser.sieve" {
 		test_fail "compile should have failed.";
 	}
@@ -37,67 +36,67 @@ test "Address errors" {
 		test_fail "compile should have failed.";
 	}
 }
-test "If errors (FIXME: count only)" {
+test "If errors" {
 	if test_script_compile "errors/if.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Require errors (FIXME: count only)" {
+test "Require errors" {
 	if test_script_compile "errors/require.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Size errors (FIXME: count only)" {
+test "Size errors" {
 	if test_script_compile "errors/size.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Envelope errors (FIXME: count only)" {
+test "Envelope errors" {
 	if test_script_compile "errors/envelope.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Stop errors (FIXME: count only)" {
+test "Stop errors" {
 	if test_script_compile "errors/stop.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Keep errors (FIXME: count only)" {
+test "Keep errors" {
 	if test_script_compile "errors/keep.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Fileinto errors (FIXME: count only)" {
+test "Fileinto errors" {
 	if test_script_compile "errors/fileinto.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "COMPARATOR errors (FIXME: count only)" {
+test "COMPARATOR errors" {
 	if test_script_compile "errors/comparator.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "ADDRESS-PART errors (FIXME: count only)" {
+test "ADDRESS-PART errors" {
 	if test_script_compile "errors/address-part.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "MATCH-TYPE errors (FIXME: count only)" {
+test "MATCH-TYPE errors" {
 	if test_script_compile "errors/match-type.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Encoded-character errors (FIXME: count only)" {
+test "Encoded-character errors" {
 	if test_script_compile "errors/encoded-character.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Outgoing address errors (FIXME: count only)" {
+test "Outgoing address errors" {
 	if test_script_compile "errors/out-address.sieve" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Tagged argument errors (FIXME: count only)" {
+test "Tagged argument errors" {
 	if test_script_compile "errors/tag.sieve" {
 		test_fail "compile should have failed.";
 	}
@@ -107,7 +106,7 @@ test "Typos" {
 		test_fail "compile should have failed.";
 	}
 }
-test "Unsupported language features (FIXME: count only)" {
+test "Unsupported language features" {
 	if test_script_compile "errors/unsupported.sieve" {
 		test_fail "compile should have failed.";
 	}
@@ -117,7 +116,6 @@ test "Unsupported language features (FIXME: count only)" {
 }
 
 func TestCompileRecover(t *testing.T) {
-	t.Skip("FIXME: Non-conforming compilation")
 	RunDovecotTestInline(t, filepath.Join("pigeonhole", "tests", "compile"), `
 require "vnd.dovecot.testsuite";
 test "Missing semicolons" {

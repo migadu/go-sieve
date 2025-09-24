@@ -16,6 +16,7 @@ const (
 	MatchMatches  Match = "matches"
 	MatchValue    Match = "value"
 	MatchCount    Match = "count"
+	MatchRegex    Match = "regex"
 )
 
 type Comparator string
@@ -96,6 +97,8 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 			return value == key, nil, nil
 		case MatchMatches:
 			return matchOctet(key, value, false)
+		case MatchRegex:
+			return matchRegex(key, value)
 		case MatchValue:
 			return rel.CompareString(value, key), nil, nil
 		case MatchCount:
@@ -110,6 +113,8 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 			rhsNum := numericValue(key)
 			return RelEqual.CompareNumericValue(lhsNum, rhsNum), nil, nil
 		case MatchMatches:
+			return false, nil, ErrComparatorMatchUnsupported
+		case MatchRegex:
 			return false, nil, ErrComparatorMatchUnsupported
 		case MatchValue:
 			lhsNum := numericValue(value)
@@ -130,6 +135,10 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 			return value == key, nil, nil
 		case MatchMatches:
 			return matchOctet(key, value, true)
+		case MatchRegex:
+			// For case-insensitive regex, normalize value but not pattern
+			value = toLowerASCII(value)
+			return matchRegex(key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -147,6 +156,10 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 			return strings.EqualFold(value, key), nil, nil
 		case MatchMatches:
 			return matchUnicode(key, value, true)
+		case MatchRegex:
+			// For Unicode case-insensitive regex, normalize value but not pattern
+			value = strings.ToLower(value)
+			return matchRegex(key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -219,4 +232,23 @@ func toLowerASCII(s string) string {
 		b.WriteString(s[pos:])
 	}
 	return b.String()
+}
+
+// matchRegex performs safe regex matching and returns match result and capture groups
+func matchRegex(pattern, value string) (bool, []string, error) {
+	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
+	if err != nil {
+		return false, nil, err
+	}
+
+	matches, err := matcher.FindSubmatch(value)
+	if err != nil {
+		return false, nil, err
+	}
+
+	if matches == nil {
+		return false, nil, nil
+	}
+
+	return true, matches, nil
 }

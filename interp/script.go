@@ -27,8 +27,9 @@ type Options struct {
 }
 
 type Script struct {
-	extensions map[string]struct{}
-	cmd        []Cmd
+	extensions        map[string]struct{}
+	cmd               []Cmd
+	enabledExtensions []string
 
 	opts *Options
 }

@@ -75,6 +75,7 @@ type CmdKeep struct {
 
 func (c CmdKeep) Execute(_ context.Context, d *RuntimeData) error {
 	d.Keep = true
+	// keep is a non-terminating action - it does NOT cancel implicit keep
 	if c.Flags != nil {
 		d.Flags = canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases)
 	}

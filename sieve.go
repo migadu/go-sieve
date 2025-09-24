@@ -20,6 +20,10 @@ type (
 		Lexer  lexer.Options
 		Parser parser.Options
 		Interp interp.Options
+		// EnabledExtensions controls which Sieve extensions are allowed.
+		// If nil, no extensions are enabled.
+		// If specified, only extensions in this slice are allowed.
+		EnabledExtensions []string
 	}
 )
 
@@ -38,6 +42,7 @@ func DefaultOptions() Options {
 			MaxVariableNameLen: 32,
 			MaxVariableLen:     4000,
 		},
+		EnabledExtensions: nil, // nil means no extensions enabled
 	}
 }
 
@@ -52,7 +57,7 @@ func Load(r io.Reader, opts Options) (*Script, error) {
 		return nil, err
 	}
 
-	return interp.LoadScript(cmds, &opts.Interp)
+	return interp.LoadScript(cmds, &opts.Interp, opts.EnabledExtensions)
 }
 
 func NewRuntimeData(s *Script, p interp.PolicyReader, e interp.Envelope, msg interp.Message) *interp.RuntimeData {
