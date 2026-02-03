@@ -102,7 +102,8 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 		Days:    c.Days,
 	}
 
-	d.ImplicitKeep = false
+	// Per RFC 5230 Section 4: "The vacation action does not cancel the implicit keep."
+	// Therefore, we do NOT set d.ImplicitKeep = false here.
 
 	return nil
 }
