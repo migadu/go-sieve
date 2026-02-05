@@ -52,6 +52,7 @@ func testExecute(ctx context.Context, t *testing.T, in string, eml string, shoul
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+		"date", "index",
 	}
 	loadedScript, err := Load(script, opts)
 	if err != nil {
@@ -366,6 +367,89 @@ func TestSize(t *testing.T) {
 	})
 	t.Run("invalid-number-error", func(t *testing.T) {
 		testExecute(ctx, t, `if size :over "abc" { keep; }`, eml, true, Result{})
+	})
+}
+
+func TestDate(t *testing.T) {
+	ctx := context.Background()
+	t.Run("date-year", func(t *testing.T) {
+		// Date header: Tue, 1 Apr 1997 09:06:31 -0800 (PST)
+		script := `require "date"; if date :is :originalzone "date" "year" "1997" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-month", func(t *testing.T) {
+		script := `require "date"; if date :is :originalzone "date" "month" "04" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-weekday", func(t *testing.T) {
+		// April 1, 1997 was a Tuesday (weekday = 2)
+		script := `require "date"; if date :is :originalzone "date" "weekday" "2" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-hour-originalzone", func(t *testing.T) {
+		// The date has hour 09 in -0800 timezone
+		script := `require "date"; if date :is :originalzone "date" "hour" "09" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-zone-shift", func(t *testing.T) {
+		// Shift from -0800 to +0000, hour should be 17 (09 + 8)
+		script := `require "date"; if date :is :zone "+0000" "date" "hour" "17" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-relational", func(t *testing.T) {
+		// Year >= 1990
+		script := `require ["date", "relational"]; if date :value "ge" :originalzone "date" "year" "1990" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-no-match", func(t *testing.T) {
+		script := `require "date"; if date :is :originalzone "date" "year" "2020" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("currentdate-year", func(t *testing.T) {
+		// Current year should match 20* pattern
+		script := `require "date"; if currentdate :matches "year" "20*" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("date-without-require-error", func(t *testing.T) {
+		script := `if date :is "date" "year" "1997" { keep; }`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("currentdate-vacation-style", func(t *testing.T) {
+		// This tests the pattern: vacation with date range using currentdate
+		script := `require ["date", "relational"];
+		if allof (
+		  currentdate :value "ge" "date" "2020-01-01",
+		  currentdate :value "le" "date" "2030-12-31"
+		) {
+		  keep;
+		}`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
 	})
 }
 

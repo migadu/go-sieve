@@ -25,12 +25,12 @@ func parseEnvelopeAddress(addr string) (string, error) {
 	if addr == "" {
 		return "", nil
 	}
-	
-	// Handle null reverse path <> 
+
+	// Handle null reverse path <>
 	if addr == "<>" {
 		return "", nil
 	}
-	
+
 	// Must be in angle brackets for valid envelope address
 	if !strings.HasPrefix(addr, "<") || !strings.HasSuffix(addr, ">") {
 		// Some addresses might not have brackets - validate basic syntax
@@ -45,10 +45,10 @@ func parseEnvelopeAddress(addr string) (string, error) {
 		}
 		return addr, nil
 	}
-	
+
 	// Remove angle brackets
 	inner := addr[1 : len(addr)-1]
-	
+
 	// Handle source route: <@host1,@host2:user@domain>
 	if strings.Contains(inner, ":") {
 		// Check for malformed source routes
@@ -56,21 +56,21 @@ func parseEnvelopeAddress(addr string) (string, error) {
 		if len(parts) != 2 {
 			return "", fmt.Errorf("invalid source route syntax")
 		}
-		
+
 		sourceRoute := parts[0]
 		actualAddr := parts[1]
-		
+
 		// Validate source route format: must start with @ and be comma-separated
 		if !strings.HasPrefix(sourceRoute, "@") {
 			return "", fmt.Errorf("invalid source route: must start with @")
 		}
-		
+
 		// Additional validation: source route can't contain @ without proper comma separation
 		// Invalid: @host1@host2  Valid: @host1,@host2
 		if strings.Count(sourceRoute, "@") > strings.Count(sourceRoute, ",")+1 {
 			return "", fmt.Errorf("invalid source route: malformed host list")
 		}
-		
+
 		// Split by comma and validate each host
 		hosts := strings.Split(sourceRoute, ",")
 		for _, host := range hosts {
@@ -88,16 +88,16 @@ func parseEnvelopeAddress(addr string) (string, error) {
 				return "", fmt.Errorf("invalid hostname in source route: %s", hostName)
 			}
 		}
-		
+
 		// Return the actual address, ignoring source route
 		return actualAddr, nil
 	}
-	
+
 	// Regular address validation
 	if inner == "MAILER-DAEMON" {
 		return inner, nil
 	}
-	
+
 	// Check for basic syntax errors
 	if strings.Count(inner, "@") != 1 {
 		if strings.Count(inner, "@") == 0 {
@@ -105,12 +105,12 @@ func parseEnvelopeAddress(addr string) (string, error) {
 		}
 		return "", fmt.Errorf("invalid envelope address: multiple @")
 	}
-	
+
 	parts := strings.SplitN(inner, "@", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", fmt.Errorf("invalid envelope address: empty local part or domain")
 	}
-	
+
 	return inner, nil
 }
 

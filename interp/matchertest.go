@@ -140,9 +140,8 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 		}
 	}
 
-	if t.match == MatchCount && t.comparator != ComparatorASCIINumeric {
-		return fmt.Errorf("non-numeric comparators cannot be used with :count")
-	}
+	// Note: :count always performs numeric comparison internally via countMatches(),
+	// regardless of the comparator setting. The comparator is not used for :count.
 
 	if (t.match == MatchContains || t.match == MatchMatches) && t.comparator == ComparatorASCIINumeric {
 		return fmt.Errorf("numeric comparator cannot be used with :contains or :matches")

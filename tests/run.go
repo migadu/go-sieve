@@ -23,6 +23,7 @@ func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+		"date", "index",
 	}
 
 	script, err := sieve.Load(strings.NewReader(scriptText), opts)
@@ -37,12 +38,12 @@ func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {
 		From: "sender@example.com",
 		To:   "recipient@example.com",
 	}
-	
+
 	msg := interp.MessageStatic{
 		Header: make(textproto.MIMEHeader),
 		Size:   100,
 	}
-	
+
 	data := sieve.NewRuntimeData(script, interp.DummyPolicy{}, env, msg)
 
 	if baseDir == "" {
@@ -77,6 +78,7 @@ func RunDovecotTestWithout(t *testing.T, path string, disabledTests []string) {
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+		"date", "index",
 	}
 
 	script, err := sieve.Load(bytes.NewReader(svScript), opts)

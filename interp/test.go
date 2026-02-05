@@ -10,7 +10,7 @@ import (
 )
 
 // stripRFC2822Comments removes RFC 2822 comments (text in parentheses) from address strings
-// This allows parsing addresses like "tss(no spam)@fi.iki" -> "tss@fi.iki" 
+// This allows parsing addresses like "tss(no spam)@fi.iki" -> "tss@fi.iki"
 func stripRFC2822Comments(addr string) string {
 	// Simple regex to remove text in parentheses
 	// This is a basic implementation - RFC 2822 comment parsing is complex
@@ -84,13 +84,13 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			return false, err
 		}
 
-		// Handle case where header exists but has no values (empty header)  
+		// Handle case where header exists but has no values (empty header)
 		if len(values) == 0 {
 			if a.isCount() {
 				// No addresses to count for this header
 				continue
 			}
-			
+
 			// Try to match against empty string for empty header
 			ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
 			if err != nil {
@@ -105,20 +105,20 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 		for _, value := range values {
 			// Strip RFC 2822 comments before parsing
 			cleanValue := stripRFC2822Comments(value)
-			
+
 			// Check for invalid angle bracket usage (bare angle brackets without display name)
 			// Pattern like "<email@domain.com>" without preceding display name is invalid
 			trimmed := strings.TrimSpace(cleanValue)
-			hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") && 
-			   strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
-			
+			hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") &&
+				strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
+
 			if hasBareAngleBrackets {
 				// Bare angle brackets are invalid for address parsing, but for :all we can match literally
 				if a.isCount() {
 					// For count mode, invalid addresses don't count
 					continue
 				}
-				
+
 				// Try literal matching against the invalid address format
 				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
 				if err != nil {
@@ -129,7 +129,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				}
 				continue
 			}
-			
+
 			addrList, err := mail.ParseAddressList(cleanValue)
 			if err != nil {
 				// If parsing fails, try matching against the literal header value
@@ -137,7 +137,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 					// For count mode, non-parseable addresses don't count
 					continue
 				}
-				
+
 				// For failed address parsing, match against the literal value
 				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
 				if err != nil {
@@ -155,7 +155,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 					// No addresses to count
 					continue
 				}
-				
+
 				// Try to match against empty string
 				ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
 				if err != nil {
@@ -246,7 +246,7 @@ func (e EnvelopeTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 		default:
 			return false, fmt.Errorf("envelope: unsupported envelope-part: %v", field)
 		}
-		
+
 		// For envelope addresses (from/to), we need to validate them first
 		// If the address is syntactically invalid, envelope tests should not match
 		// Note: auth is not an address, so don't validate it
@@ -259,7 +259,7 @@ func (e EnvelopeTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				continue
 			}
 		}
-		
+
 		if e.isCount() {
 			if value != "" {
 				entryCount++

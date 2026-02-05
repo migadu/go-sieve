@@ -24,6 +24,8 @@ var supportedRequires = map[string]struct{}{
 	"vacation":   {},
 	"copy":       {}, // RFC3894 - :copy extension for redirect and fileinto
 	"regex":      {}, // draft-murchison-sieve-regex - regex match type
+	"date":       {}, // RFC5260 - Date and Index Extensions
+	"index":      {}, // RFC5260 - Date and Index Extensions
 }
 
 var (
@@ -83,6 +85,9 @@ func init() {
 		"size":     loadSizeTest,
 		// RFC 5229 (variables extension)
 		"string": loadStringTest,
+		// RFC 5260 (date extension)
+		"date":        loadDateTest,
+		"currentdate": loadCurrentDateTest,
 		// vnd.dovecot.testsuite
 		"test_script_compile": loadDovecotCompile, // compile script (to test for compile errors)
 		"test_script_run":     loadDovecotRun,     // run script (to test for run-time errors)
