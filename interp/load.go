@@ -26,6 +26,9 @@ var supportedRequires = map[string]struct{}{
 	"regex":      {}, // draft-murchison-sieve-regex - regex match type
 	"date":       {}, // RFC5260 - Date and Index Extensions
 	"index":      {}, // RFC5260 - Date and Index Extensions
+	"editheader": {}, // RFC5293 - Editheader Extension
+	"mailbox":    {}, // RFC5490 - Mailbox Extension
+	"subaddress": {}, // RFC5233 - Subaddress Extension
 }
 
 var (
@@ -55,6 +58,9 @@ func init() {
 		"set": loadSet,
 		// RFC 5230 (vacation extension)
 		"vacation": loadVacation,
+		// RFC 5293 (editheader extension)
+		"addheader":    loadAddHeader,
+		"deleteheader": loadDeleteHeader,
 		// vnd.dovecot.testsuite
 		"test":             loadDovecotTest,
 		"test_set":         loadDovecotTestSet,
@@ -88,6 +94,8 @@ func init() {
 		// RFC 5260 (date extension)
 		"date":        loadDateTest,
 		"currentdate": loadCurrentDateTest,
+		// RFC 5490 (mailbox extension)
+		"mailboxexists": loadMailboxExistsTest,
 		// vnd.dovecot.testsuite
 		"test_script_compile": loadDovecotCompile, // compile script (to test for compile errors)
 		"test_script_run":     loadDovecotRun,     // run script (to test for run-time errors)

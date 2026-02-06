@@ -12,6 +12,7 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 		AddressPart: All,
 	}
 	var key []string
+	var useSubaddress bool
 	err := LoadSpec(s, loaded.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
 			"all": {
@@ -30,6 +31,21 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 				MatchBool: func() {
 					loaded.AddressPart = Domain
 					loaded.AddressPartCnt++
+				},
+			},
+			// RFC 5233 subaddress extension
+			"user": {
+				MatchBool: func() {
+					loaded.AddressPart = User
+					loaded.AddressPartCnt++
+					useSubaddress = true
+				},
+			},
+			"detail": {
+				MatchBool: func() {
+					loaded.AddressPart = Detail
+					loaded.AddressPartCnt++
+					useSubaddress = true
 				},
 			},
 		},
@@ -59,6 +75,11 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 	// Check for duplicate address parts
 	if loaded.AddressPartCnt > 1 {
 		return nil, fmt.Errorf("multiple address-parts are not allowed")
+	}
+
+	// Check for require "subaddress" when :user or :detail is used
+	if useSubaddress && !s.RequiresExtension("subaddress") {
+		return nil, parser.ErrorAt(test.Position, "missing require 'subaddress'")
 	}
 
 	return loaded, nil
@@ -96,6 +117,7 @@ func loadEnvelopeTest(s *Script, test parser.Test) (Test, error) {
 		AddressPart: All,
 	}
 	var key []string
+	var useSubaddress bool
 	err := LoadSpec(s, loaded.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
 			"all": {
@@ -111,6 +133,19 @@ func loadEnvelopeTest(s *Script, test parser.Test) (Test, error) {
 			"domain": {
 				MatchBool: func() {
 					loaded.AddressPart = Domain
+				},
+			},
+			// RFC 5233 subaddress extension
+			"user": {
+				MatchBool: func() {
+					loaded.AddressPart = User
+					useSubaddress = true
+				},
+			},
+			"detail": {
+				MatchBool: func() {
+					loaded.AddressPart = Detail
+					useSubaddress = true
 				},
 			},
 		},
@@ -135,6 +170,11 @@ func loadEnvelopeTest(s *Script, test parser.Test) (Test, error) {
 
 	if err := loaded.setKey(s, key); err != nil {
 		return nil, err
+	}
+
+	// Check for require "subaddress" when :user or :detail is used
+	if useSubaddress && !s.RequiresExtension("subaddress") {
+		return nil, parser.ErrorAt(test.Position, "missing require 'subaddress'")
 	}
 
 	return loaded, nil

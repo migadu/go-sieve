@@ -23,7 +23,7 @@ func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
-		"date", "index",
+		"date", "index", "editheader", "mailbox", "subaddress",
 	}
 
 	script, err := sieve.Load(strings.NewReader(scriptText), opts)
@@ -78,7 +78,7 @@ func RunDovecotTestWithout(t *testing.T, path string, disabledTests []string) {
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
-		"date", "index",
+		"date", "index", "editheader", "mailbox", "subaddress",
 	}
 
 	script, err := sieve.Load(bytes.NewReader(svScript), opts)

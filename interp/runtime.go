@@ -50,16 +50,20 @@ type RuntimeData struct {
 
 	ifResult bool
 
-	RedirectAddr []string
-	Mailboxes    []string
-	Flags        []string
-	Keep         bool
-	ImplicitKeep bool
+	RedirectAddr    []string
+	Mailboxes       []string
+	MailboxesCreate []string // Mailboxes that should be created (RFC 5490 :create)
+	Flags           []string
+	Keep            bool
+	ImplicitKeep    bool
 
 	FlagAliases map[string]string
 
 	MatchVariables []string
 	Variables      map[string]string
+
+	// Editheader extension state (RFC 5293)
+	HeaderEdits []HeaderEdit
 
 	// Vacation extension state
 	VacationResponses map[string]VacationResponse
@@ -81,6 +85,7 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		Namespace:       d.Namespace,
 		RedirectAddr:    make([]string, len(d.RedirectAddr)),
 		Mailboxes:       make([]string, len(d.Mailboxes)),
+		MailboxesCreate: make([]string, len(d.MailboxesCreate)),
 		Flags:           make([]string, len(d.Flags)),
 		Keep:            d.Keep,
 		ImplicitKeep:    d.ImplicitKeep,
@@ -102,8 +107,15 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		}
 	}
 
+	// Copy header edits if they exist
+	if d.HeaderEdits != nil {
+		newData.HeaderEdits = make([]HeaderEdit, len(d.HeaderEdits))
+		copy(newData.HeaderEdits, d.HeaderEdits)
+	}
+
 	copy(newData.RedirectAddr, d.RedirectAddr)
 	copy(newData.Mailboxes, d.Mailboxes)
+	copy(newData.MailboxesCreate, d.MailboxesCreate)
 	copy(newData.Flags, d.Flags)
 	copy(newData.MatchVariables, d.MatchVariables)
 

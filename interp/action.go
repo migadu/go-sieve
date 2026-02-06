@@ -15,6 +15,7 @@ type CmdFileInto struct {
 	Mailbox string
 	Flags   Flags
 	Copy    bool // RFC3894 - :copy modifier
+	Create  bool // RFC5490 - :create modifier (mailbox extension)
 }
 
 func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
@@ -29,6 +30,20 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 		return nil
 	}
 	d.Mailboxes = append(d.Mailboxes, mailbox)
+
+	// RFC 5490: Track mailboxes that should be created
+	if c.Create {
+		createFound := false
+		for _, m := range d.MailboxesCreate {
+			if m == mailbox {
+				createFound = true
+				break
+			}
+		}
+		if !createFound {
+			d.MailboxesCreate = append(d.MailboxesCreate, mailbox)
+		}
+	}
 
 	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
 	if !c.Copy {

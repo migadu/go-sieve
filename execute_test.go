@@ -52,7 +52,7 @@ func testExecute(ctx context.Context, t *testing.T, in string, eml string, shoul
 		"comparator-i;octet", "comparator-i;ascii-casemap",
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
-		"date", "index",
+		"date", "index", "editheader", "mailbox", "subaddress",
 	}
 	loadedScript, err := Load(script, opts)
 	if err != nil {
@@ -447,6 +447,422 @@ func TestDate(t *testing.T) {
 		  keep;
 		}`
 		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+}
+
+func TestEditheader(t *testing.T) {
+	ctx := context.Background()
+	t.Run("addheader-and-exists", func(t *testing.T) {
+		// Add a header and verify it exists
+		script := `require "editheader"; addheader "X-Test" "hello"; if exists "X-Test" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-and-header-test", func(t *testing.T) {
+		// Add a header and verify its value with header test
+		script := `require "editheader"; addheader "X-Test" "hello world"; if header :contains "X-Test" "hello" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-without-require", func(t *testing.T) {
+		// addheader without require should fail
+		script := `addheader "X-Test" "hello"; keep;`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("deleteheader-without-require", func(t *testing.T) {
+		// deleteheader without require should fail
+		script := `deleteheader "Subject"; keep;`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("addheader-last", func(t *testing.T) {
+		// Add a header at the end with :last
+		script := `require "editheader"; addheader :last "X-Test" "world"; if exists "X-Test" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-protected-received", func(t *testing.T) {
+		// Deleting "Received" should be silently ignored (protected header)
+		script := `require "editheader"; deleteheader "Received"; keep;`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-protected-auto-submitted", func(t *testing.T) {
+		// Deleting "Auto-Submitted" should be silently ignored (protected header)
+		script := `require "editheader"; deleteheader "Auto-Submitted"; keep;`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-then-delete", func(t *testing.T) {
+		// Add a header, then delete it - should not exist after
+		script := `require "editheader"; addheader "X-Test" "value"; deleteheader "X-Test"; if not exists "X-Test" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("delete-existing-subject", func(t *testing.T) {
+		// Delete the Subject header that exists in the test message
+		script := `require "editheader"; deleteheader "Subject"; if not exists "Subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-with-is-match", func(t *testing.T) {
+		// Delete header only if it matches a specific value
+		script := `require "editheader"; deleteheader :is "Subject" "I have a present for you"; if not exists "Subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-with-is-no-match", func(t *testing.T) {
+		// Don't delete if value doesn't match
+		script := `require "editheader"; deleteheader :is "Subject" "wrong value"; if exists "Subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-with-contains", func(t *testing.T) {
+		// Delete header if it contains a substring
+		script := `require "editheader"; deleteheader :contains "Subject" "present"; if not exists "Subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-with-matches", func(t *testing.T) {
+		// Delete header matching wildcard pattern
+		script := `require "editheader"; deleteheader :matches "Subject" "I have*"; if not exists "Subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-multiple-same-name", func(t *testing.T) {
+		// Add multiple headers with same name
+		script := `require "editheader"; addheader "X-Test" "value1"; addheader "X-Test" "value2"; if header :contains "X-Test" "value1" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-with-variables", func(t *testing.T) {
+		// Add header with variable expansion
+		script := `require ["editheader", "variables"]; set "tag" "important"; addheader "X-Tag" "${tag}"; if header :is "X-Tag" "important" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-index", func(t *testing.T) {
+		// Delete specific header by index
+		script := `require "editheader"; addheader "X-Test" "first"; addheader "X-Test" "second"; deleteheader :index 1 "X-Test"; if exists "X-Test" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-index-last", func(t *testing.T) {
+		// Delete from end with :index :last
+		script := `require "editheader"; addheader "X-Test" "first"; addheader :last "X-Test" "second"; deleteheader :index 1 :last "X-Test"; if exists "X-Test" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("addheader-case-insensitive-check", func(t *testing.T) {
+		// Header names are case-insensitive
+		script := `require "editheader"; addheader "x-test" "hello"; if exists "X-TEST" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("deleteheader-case-insensitive", func(t *testing.T) {
+		// deleteheader should be case-insensitive for header name
+		script := `require "editheader"; deleteheader "SUBJECT"; if not exists "subject" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+}
+
+func TestMailbox(t *testing.T) {
+	ctx := context.Background()
+	t.Run("mailboxexists-true", func(t *testing.T) {
+		// Without MailboxChecker, mailboxexists returns true (optimistic)
+		script := `require "mailbox"; if mailboxexists "INBOX" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("mailboxexists-multiple", func(t *testing.T) {
+		// Test with multiple mailboxes
+		script := `require "mailbox"; if mailboxexists ["INBOX", "Drafts"] { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("mailboxexists-without-require", func(t *testing.T) {
+		// mailboxexists without require should fail
+		script := `if mailboxexists "INBOX" { keep; }`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("fileinto-create", func(t *testing.T) {
+		// fileinto with :create flag
+		script := `require ["fileinto", "mailbox"]; fileinto :create "NewFolder";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"NewFolder"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("fileinto-create-without-require", func(t *testing.T) {
+		// :create without mailbox require should fail
+		script := `require "fileinto"; fileinto :create "NewFolder";`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("fileinto-create-and-copy", func(t *testing.T) {
+		// fileinto with :create and :copy flags
+		script := `require ["fileinto", "mailbox", "copy"]; fileinto :create :copy "NewFolder";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"NewFolder"},
+			ImplicitKeep: true, // :copy preserves implicit keep
+		})
+	})
+	t.Run("mailboxexists-with-variable", func(t *testing.T) {
+		// mailboxexists with variable expansion
+		script := `require ["mailbox", "variables"]; set "folder" "INBOX"; if mailboxexists "${folder}" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("fileinto-create-with-variable", func(t *testing.T) {
+		// fileinto :create with variable expansion
+		script := `require ["fileinto", "mailbox", "variables"]; set "folder" "Archive"; fileinto :create "${folder}";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"Archive"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("fileinto-create-with-flags", func(t *testing.T) {
+		// fileinto :create combined with flags
+		script := `require ["fileinto", "mailbox", "imap4flags"]; fileinto :create :flags "\\Seen" "Archive";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"Archive"},
+			Flags:        []string{"\\seen"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("mailboxexists-in-condition", func(t *testing.T) {
+		// Use mailboxexists to conditionally file
+		script := `require ["fileinto", "mailbox"]; if mailboxexists "Archive" { fileinto "Archive"; } else { fileinto :create "Archive"; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"Archive"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("mailboxexists-not", func(t *testing.T) {
+		// not mailboxexists (always false without checker, so not is true... wait)
+		// Without checker, mailboxexists returns true, so not mailboxexists is false
+		script := `require "mailbox"; if not mailboxexists "NonExistent" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			ImplicitKeep: true, // Without checker, mailboxexists returns true, so not is false
+		})
+	})
+	t.Run("fileinto-multiple-create", func(t *testing.T) {
+		// Multiple fileinto :create commands
+		script := `require ["fileinto", "mailbox"]; fileinto :create "Folder1"; fileinto :create "Folder2";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto:     []string{"Folder1", "Folder2"},
+			ImplicitKeep: false,
+		})
+	})
+}
+
+// Email message with subaddress (user+detail@domain)
+var emlWithSubaddress string = `Date: Tue, 1 Apr 1997 09:06:31 -0800 (PST)
+From: ken+sieve@example.org
+To: user+mailing-list@acme.example.com
+Cc: admin+support@example.org
+Subject: Test subaddress
+
+Test message with subaddress
+`
+
+func TestSubaddress(t *testing.T) {
+	ctx := context.Background()
+	// Test message has From: coyote@desert.example.org (no subaddress)
+	t.Run("address-user-no-separator", func(t *testing.T) {
+		// :user extracts the user part (entire local-part if no separator)
+		script := `require "subaddress"; if address :user "From" "coyote" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-no-separator", func(t *testing.T) {
+		// :detail fails to match if no separator exists in address
+		script := `require "subaddress"; if address :detail "From" "" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			ImplicitKeep: true, // Should not match because no separator exists
+		})
+	})
+	t.Run("subaddress-without-require", func(t *testing.T) {
+		// :user without require should fail
+		script := `if address :user "From" "coyote" { keep; }`
+		testExecute(ctx, t, script, eml, true, Result{})
+	})
+	t.Run("envelope-user", func(t *testing.T) {
+		// Test envelope :user with from@test.com
+		script := `require ["envelope", "subaddress"]; if envelope :user "from" "from" { keep; }`
+		testExecute(ctx, t, script, eml, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	// Tests with email containing subaddress (ken+sieve@example.org)
+	t.Run("address-user-with-separator", func(t *testing.T) {
+		// :user extracts "ken" from "ken+sieve@example.org"
+		script := `require "subaddress"; if address :user "From" "ken" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-with-separator", func(t *testing.T) {
+		// :detail extracts "sieve" from "ken+sieve@example.org"
+		script := `require "subaddress"; if address :detail "From" "sieve" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-to-header", func(t *testing.T) {
+		// :detail extracts "mailing-list" from To header
+		script := `require "subaddress"; if address :detail "To" "mailing-list" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-user-contains", func(t *testing.T) {
+		// :user with :contains match type
+		script := `require "subaddress"; if address :user :contains "From" "k" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-contains", func(t *testing.T) {
+		// :detail with :contains match type
+		script := `require "subaddress"; if address :detail :contains "From" "siev" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-matches", func(t *testing.T) {
+		// :detail with :matches (wildcard)
+		script := `require "subaddress"; if address :detail :matches "To" "mailing-*" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-user-no-match", func(t *testing.T) {
+		// :user that doesn't match
+		script := `require "subaddress"; if address :user "From" "wrong" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-no-match", func(t *testing.T) {
+		// :detail that doesn't match
+		script := `require "subaddress"; if address :detail "From" "wrong" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-empty-string", func(t *testing.T) {
+		// :detail matching empty string when detail is present but empty (user+@domain)
+		// Note: For "ken+sieve@example.org", detail is "sieve", not empty
+		script := `require "subaddress"; if address :detail "From" "" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			ImplicitKeep: true, // "sieve" != ""
+		})
+	})
+	t.Run("subaddress-multiple-headers", func(t *testing.T) {
+		// Test :user across multiple headers (From, Cc both have subaddresses)
+		script := `require "subaddress"; if address :user ["From", "Cc"] "admin" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("subaddress-detail-multiple-values", func(t *testing.T) {
+		// Test :detail with multiple possible values
+		script := `require "subaddress"; if address :detail "From" ["other", "sieve", "more"] { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("subaddress-with-fileinto", func(t *testing.T) {
+		// Practical example: file based on subaddress detail
+		script := `require ["subaddress", "fileinto"]; if address :detail "To" "mailing-list" { fileinto "lists"; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Fileinto:     []string{"lists"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("subaddress-with-variables", func(t *testing.T) {
+		// Capture detail using :matches and use in fileinto
+		script := `require ["subaddress", "fileinto", "mailbox", "variables"]; 
+		if address :detail :matches "To" "*" { 
+			set :lower "folder" "${1}"; 
+			fileinto :create "${folder}"; 
+		}`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Fileinto:     []string{"mailing-list"},
+			ImplicitKeep: false,
+		})
+	})
+	t.Run("detail-without-require-error", func(t *testing.T) {
+		// :detail without require should fail
+		script := `if address :detail "From" "sieve" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, true, Result{})
+	})
+	t.Run("address-user-case-insensitive", func(t *testing.T) {
+		// :user comparison should be case-insensitive by default
+		script := `require "subaddress"; if address :user "From" "KEN" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
+			Keep:         true,
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("address-detail-case-insensitive", func(t *testing.T) {
+		// :detail comparison should be case-insensitive by default
+		script := `require "subaddress"; if address :detail "From" "SIEVE" { keep; }`
+		testExecute(ctx, t, script, emlWithSubaddress, false, Result{
 			Keep:         true,
 			ImplicitKeep: true,
 		})

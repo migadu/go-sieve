@@ -79,7 +79,8 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			continue
 		}
 
-		values, err := d.Msg.HeaderGet(hdr)
+		// Use GetHeaderWithEdits to get the current header state including any edits
+		values, err := GetHeaderWithEdits(d, hdr)
 		if err != nil {
 			return false, err
 		}
@@ -287,7 +288,8 @@ type ExistsTest struct {
 
 func (e ExistsTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 	for _, field := range e.Fields {
-		values, err := d.Msg.HeaderGet(expandVars(d, field))
+		// Use GetHeaderWithEdits to get the current header state including any edits
+		values, err := GetHeaderWithEdits(d, expandVars(d, field))
 		if err != nil {
 			return false, err
 		}
@@ -319,7 +321,8 @@ type HeaderTest struct {
 func (h HeaderTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
 	for _, hdr := range h.Header {
-		values, err := d.Msg.HeaderGet(expandVars(d, hdr))
+		// Use GetHeaderWithEdits to get the current header state including any edits
+		values, err := GetHeaderWithEdits(d, expandVars(d, hdr))
 		if err != nil {
 			return false, err
 		}

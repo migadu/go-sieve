@@ -43,7 +43,16 @@ func main() {
 	defer script.Close()
 
 	start := time.Now()
-	loadedScript, err := sieve.Load(script, sieve.DefaultOptions())
+	opts := sieve.DefaultOptions()
+	// Enable all extensions
+	opts.EnabledExtensions = []string{
+		"fileinto", "envelope", "encoded-character",
+		"comparator-i;octet", "comparator-i;ascii-casemap",
+		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
+		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
+		"date", "index", "editheader", "mailbox", "subaddress",
+	}
+	loadedScript, err := sieve.Load(script, opts)
 	end := time.Now()
 	if err != nil {
 		log.Fatalln(err)

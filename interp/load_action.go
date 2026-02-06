@@ -67,6 +67,12 @@ func loadFileInto(s *Script, pcmd parser.Cmd) (Cmd, error) {
 					cmd.Copy = true
 				},
 			},
+			"create": {
+				NeedsValue: false,
+				MatchBool: func() {
+					cmd.Create = true
+				},
+			},
 		},
 		Pos: []SpecPosArg{
 			{
@@ -88,6 +94,10 @@ func loadFileInto(s *Script, pcmd parser.Cmd) (Cmd, error) {
 
 	if cmd.Copy && !s.RequiresExtension("copy") {
 		return nil, parser.ErrorAt(pcmd.Position, "missing require 'copy'")
+	}
+
+	if cmd.Create && !s.RequiresExtension("mailbox") {
+		return nil, parser.ErrorAt(pcmd.Position, "missing require 'mailbox'")
 	}
 
 	return cmd, nil

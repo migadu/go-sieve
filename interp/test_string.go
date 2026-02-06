@@ -36,7 +36,14 @@ const (
 	LocalPart AddressPart = "localpart"
 	Domain    AddressPart = "domain"
 	All       AddressPart = "all"
+	// RFC 5233 subaddress extension
+	User   AddressPart = "user"
+	Detail AddressPart = "detail"
 )
+
+// SubaddressSeparator is the character sequence that separates user from detail
+// in subaddresses. The default is "+" but can be configured.
+var SubaddressSeparator = "+"
 
 func split(addr string) (mailbox, domain string, err error) {
 	if strings.EqualFold(addr, "postmaster") {
@@ -171,6 +178,18 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 	return false, nil, nil
 }
 
+// splitSubaddress splits a local-part into user and detail parts
+// using the SubaddressSeparator. If no separator is found, user is the
+// entire local-part and detail is empty.
+func splitSubaddress(localPart string) (user, detail string) {
+	idx := strings.Index(localPart, SubaddressSeparator)
+	if idx == -1 {
+		// No separator found - entire local-part is the user
+		return localPart, ""
+	}
+	return localPart[:idx], localPart[idx+len(SubaddressSeparator):]
+}
+
 func testAddress(d *RuntimeData, matcher matcherTest, part AddressPart, address string) (bool, error) {
 	if address == "<>" {
 		address = ""
@@ -193,6 +212,27 @@ func testAddress(d *RuntimeData, matcher matcherTest, part AddressPart, address 
 			valueToCompare = domain
 		case All:
 			valueToCompare = address
+		case User:
+			// RFC 5233: :user is the user sub-part of the local-part
+			localPart, _, err := split(address)
+			if err != nil {
+				return false, nil
+			}
+			user, _ := splitSubaddress(localPart)
+			valueToCompare = user
+		case Detail:
+			// RFC 5233: :detail is the detail sub-part of the local-part
+			// If no detail exists, the address fails to match any key
+			localPart, _, err := split(address)
+			if err != nil {
+				return false, nil
+			}
+			_, detail := splitSubaddress(localPart)
+			if detail == "" && !strings.Contains(localPart, SubaddressSeparator) {
+				// No separator found - fail to match (RFC 5233 Section 4)
+				return false, nil
+			}
+			valueToCompare = detail
 		}
 	}
 
