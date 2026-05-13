@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/foxcpp/go-sieve/lexer"
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/lexer"
+	"github.com/migadu/go-sieve/parser"
 )
 
 func testCmdLoader(t *testing.T, s *Script, in string, out []Cmd) {

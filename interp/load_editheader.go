@@ -1,7 +1,7 @@
 package interp
 
 import (
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 // loadAddHeader loads the addheader command

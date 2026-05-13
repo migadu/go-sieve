@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/foxcpp/go-sieve/lexer"
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/lexer"
+	"github.com/migadu/go-sieve/parser"
 )
 
 var supportedRequires = map[string]struct{}{

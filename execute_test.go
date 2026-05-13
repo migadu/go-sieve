@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxcpp/go-sieve/interp"
+	"github.com/migadu/go-sieve/interp"
 )
 
 var eml string = `Date: Tue, 1 Apr 1997 09:06:31 -0800 (PST)

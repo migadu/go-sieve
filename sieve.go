@@ -3,9 +3,9 @@ package sieve
 import (
 	"io"
 
-	"github.com/foxcpp/go-sieve/interp"
-	"github.com/foxcpp/go-sieve/lexer"
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/interp"
+	"github.com/migadu/go-sieve/lexer"
+	"github.com/migadu/go-sieve/parser"
 )
 
 type (

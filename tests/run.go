@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/foxcpp/go-sieve"
-	"github.com/foxcpp/go-sieve/interp"
+	"github.com/migadu/go-sieve"
+	"github.com/migadu/go-sieve/interp"
 )
 
 func RunDovecotTestInline(t *testing.T, baseDir string, scriptText string) {

@@ -3,8 +3,8 @@ package interp
 import (
 	"strings"
 
-	"github.com/foxcpp/go-sieve/lexer"
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/lexer"
+	"github.com/migadu/go-sieve/parser"
 )
 
 type SpecTag struct {

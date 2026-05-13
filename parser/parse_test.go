@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/foxcpp/go-sieve/lexer"
+	"github.com/migadu/go-sieve/lexer"
 )
 
 const exampleScript = ` #

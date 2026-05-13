@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 // loadDateTest loads the "date" test as defined in RFC 5260.

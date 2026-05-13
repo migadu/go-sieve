@@ -3,7 +3,7 @@ package interp
 import (
 	"fmt"
 
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 func loadRequire(s *Script, pcmd parser.Cmd) (Cmd, error) {

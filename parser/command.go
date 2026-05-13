@@ -1,6 +1,6 @@
 package parser
 
-import "github.com/foxcpp/go-sieve/lexer"
+import "github.com/migadu/go-sieve/lexer"
 
 type Arg interface {
 	LineCol() (int, int)

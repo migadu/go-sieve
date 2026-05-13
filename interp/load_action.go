@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 type Flags []string

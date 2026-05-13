@@ -1,4 +1,4 @@
-module github.com/foxcpp/go-sieve
+module github.com/migadu/go-sieve
 
 go 1.20
 

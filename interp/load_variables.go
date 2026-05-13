@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {

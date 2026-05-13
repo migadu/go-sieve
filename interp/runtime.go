@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/foxcpp/go-sieve/lexer"
+	"github.com/migadu/go-sieve/lexer"
 )
 
 type PolicyReader interface {

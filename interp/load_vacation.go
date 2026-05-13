@@ -1,7 +1,7 @@
 package interp
 
 import (
-	"github.com/foxcpp/go-sieve/parser"
+	"github.com/migadu/go-sieve/parser"
 )
 
 // loadVacation loads the vacation command as defined in RFC 5230.

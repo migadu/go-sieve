@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"github.com/foxcpp/go-sieve/lexer"
+	"github.com/migadu/go-sieve/lexer"
 )
 
 type Options struct {
