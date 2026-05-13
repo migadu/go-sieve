@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/textproto"
 	"strconv"
@@ -120,22 +121,21 @@ type CmdDovecotTest struct {
 }
 
 func (c CmdDovecotTest) Execute(ctx context.Context, d *RuntimeData) error {
-	testData := d.Copy()
-	testData.testName = c.TestName
-	testData.testFailMessage = ""
+	d.testName = c.TestName
+	d.testFailMessage = ""
 
 	d.Script.opts.T.Run(c.TestName, func(t *testing.T) {
-		for _, testName := range testData.Script.opts.DisabledTests {
+		for _, testName := range d.Script.opts.DisabledTests {
 			if c.TestName == testName {
 				t.Skip("test is disabled by DisabledTests")
 			}
 		}
 
 		for _, cmd := range c.Cmds {
-			if err := cmd.Execute(ctx, testData); err != nil {
+			if err := cmd.Execute(ctx, d); err != nil {
 				if errors.Is(err, ErrStop) {
-					if testData.testFailMessage != "" {
-						t.Errorf("test_fail at %v called: %v", testData.testFailAt, testData.testFailMessage)
+					if d.testFailMessage != "" {
+						t.Errorf("test_fail at %v called: %v", d.testFailAt, d.testFailMessage)
 					}
 					return
 				}
@@ -193,14 +193,21 @@ func (c CmdDovecotTestSet) Execute(_ context.Context, d *RuntimeData) error {
 	switch c.VariableName {
 	case "message":
 		r := textproto.NewReader(bufio.NewReader(strings.NewReader(c.VariableValue)))
-		msgHdr, err := r.ReadMIMEHeader()
+		msgHdr, hdrErr := r.ReadMIMEHeader()
+		if hdrErr != nil && hdrErr != io.EOF {
+			return fmt.Errorf("failed to parse test message: %v", hdrErr)
+		}
+
+		bodyBytes, err := io.ReadAll(r.R)
 		if err != nil {
-			return fmt.Errorf("failed to parse test message: %v", err)
+			return fmt.Errorf("failed to read test message body: %v", err)
 		}
 
 		d.Msg = MessageStatic{
-			Size:   len(c.VariableValue),
-			Header: msgHdr,
+			Size:    len(c.VariableValue),
+			Header:  msgHdr,
+			Body:    bodyBytes,
+			HasBody: hdrErr != io.EOF,
 		}
 	case "envelope.from":
 		parsedAddr, err := parseEnvelopeAddress(value)

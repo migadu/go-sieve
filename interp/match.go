@@ -16,6 +16,7 @@ func foldASCII(b byte) byte {
 
 func patternToRegex(pattern string, caseFold bool) string {
 	result := strings.Builder{}
+	result.WriteString(`(?s)`)
 	if caseFold {
 		result.WriteString(`(?i)`)
 	}

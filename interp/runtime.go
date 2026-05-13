@@ -38,6 +38,7 @@ type Message interface {
 	*/
 	HeaderGet(key string) ([]string, error)
 	MessageSize() int
+	BodyRaw() ([]byte, bool, error)
 }
 
 type RuntimeData struct {

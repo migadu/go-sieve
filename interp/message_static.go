@@ -43,8 +43,10 @@ func (m EnvelopeStatic) AuthUsername() string {
 // MessageStatic is a simple Message interface implementation
 // that just keeps all data in memory in a Go struct.
 type MessageStatic struct {
-	Size   int
-	Header MessageHeader
+	Size    int
+	Header  MessageHeader
+	Body    []byte
+	HasBody bool
 }
 
 func (m MessageStatic) HeaderGet(key string) ([]string, error) {
@@ -53,4 +55,8 @@ func (m MessageStatic) HeaderGet(key string) ([]string, error) {
 
 func (m MessageStatic) MessageSize() int {
 	return m.Size
+}
+
+func (m MessageStatic) BodyRaw() ([]byte, bool, error) {
+	return m.Body, m.HasBody, nil
 }

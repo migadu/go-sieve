@@ -29,6 +29,7 @@ var supportedRequires = map[string]struct{}{
 	"editheader": {}, // RFC5293 - Editheader Extension
 	"mailbox":    {}, // RFC5490 - Mailbox Extension
 	"subaddress": {}, // RFC5233 - Subaddress Extension
+	"body":       {}, // RFC5173 - Body Extension
 }
 
 var (
@@ -96,6 +97,8 @@ func init() {
 		"currentdate": loadCurrentDateTest,
 		// RFC 5490 (mailbox extension)
 		"mailboxexists": loadMailboxExistsTest,
+		// RFC 5173 (body extension)
+		"body": loadBodyTest,
 		// vnd.dovecot.testsuite
 		"test_script_compile": loadDovecotCompile, // compile script (to test for compile errors)
 		"test_script_run":     loadDovecotRun,     // run script (to test for run-time errors)
