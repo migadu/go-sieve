@@ -185,7 +185,7 @@ type DateTest struct {
 	Last         bool     // Use last header instead of first (from "index" extension)
 }
 
-func (d DateTest) Check(_ context.Context, rd *RuntimeData) (bool, error) {
+func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	header := expandVars(rd, d.Header)
 
 	values, err := rd.Msg.HeaderGet(header)
@@ -242,7 +242,7 @@ func (d DateTest) Check(_ context.Context, rd *RuntimeData) (bool, error) {
 	}
 
 	// Match against keys
-	return d.matcherTest.tryMatch(rd, partValue)
+	return d.matcherTest.tryMatch(ctx, rd, partValue)
 }
 
 func (d DateTest) applyZone(t time.Time) time.Time {
@@ -273,7 +273,7 @@ type CurrentDateTest struct {
 	Zone     string   // Time zone offset (e.g., "+0500")
 }
 
-func (c CurrentDateTest) Check(_ context.Context, rd *RuntimeData) (bool, error) {
+func (c CurrentDateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	// Get current time
 	t := time.Now()
 
@@ -295,5 +295,5 @@ func (c CurrentDateTest) Check(_ context.Context, rd *RuntimeData) (bool, error)
 	}
 
 	// Match against keys
-	return c.matcherTest.tryMatch(rd, partValue)
+	return c.matcherTest.tryMatch(ctx, rd, partValue)
 }

@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 )
@@ -173,18 +174,24 @@ func (t *matcherTest) countMatches(d *RuntimeData, value uint64) bool {
 	return false
 }
 
-func (t *matcherTest) tryMatch(d *RuntimeData, source string) (bool, error) {
+func (t *matcherTest) tryMatch(ctx context.Context, d *RuntimeData, source string) (bool, error) {
 	for i, key := range t.key {
+		// Honour the script execution deadline between keys so a test with
+		// many keys/values can't run past the budget.
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
 		var (
 			ok      bool
 			matches []string
 			err     error
 		)
 		if t.keyCompiled != nil && t.keyCompiled[i] != nil {
-			ok, matches, err = t.keyCompiled[i](source)
+			ok, matches, err = t.keyCompiled[i](ctx, source)
 		} else {
 			key = expandVars(d, key)
-			ok, matches, err = testString(t.comparator, t.match, t.relational, source, expandVars(d, key))
+			ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, expandVars(d, key))
 
 			// RFC 5231, Section 5.4:
 			// With the "i;ascii-numeric" comparator, a numeric comparison is

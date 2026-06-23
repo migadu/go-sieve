@@ -85,7 +85,7 @@ type CmdDeleteHeader struct {
 	Last          bool
 }
 
-func (c CmdDeleteHeader) Execute(_ context.Context, d *RuntimeData) error {
+func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 	fieldName := expandVars(d, c.FieldName)
 
 	// Validate field name
@@ -137,7 +137,7 @@ func (c CmdDeleteHeader) Execute(_ context.Context, d *RuntimeData) error {
 		}
 
 		// Check if the value at this index matches any pattern
-		matches, err := c.valueMatchesPatterns(d, values[idx], valuePatterns)
+		matches, err := c.valueMatchesPatterns(ctx, d, values[idx], valuePatterns)
 		if err != nil || !matches {
 			return nil
 		}
@@ -155,7 +155,7 @@ func (c CmdDeleteHeader) Execute(_ context.Context, d *RuntimeData) error {
 
 	// No :index, check all occurrences
 	for _, val := range values {
-		matches, err := c.valueMatchesPatterns(d, val, valuePatterns)
+		matches, err := c.valueMatchesPatterns(ctx, d, val, valuePatterns)
 		if err != nil {
 			continue
 		}
@@ -171,12 +171,12 @@ func (c CmdDeleteHeader) Execute(_ context.Context, d *RuntimeData) error {
 	return nil
 }
 
-func (c CmdDeleteHeader) valueMatchesPatterns(d *RuntimeData, value string, patterns []string) (bool, error) {
+func (c CmdDeleteHeader) valueMatchesPatterns(ctx context.Context, d *RuntimeData, value string, patterns []string) (bool, error) {
 	// Trim leading/trailing whitespace as per RFC 5293
 	value = strings.TrimSpace(value)
 
 	for _, pattern := range patterns {
-		ok, err := c.matcherTest.tryMatch(d, value)
+		ok, err := c.matcherTest.tryMatch(ctx, d, value)
 		if err != nil {
 			return false, err
 		}
@@ -185,7 +185,7 @@ func (c CmdDeleteHeader) valueMatchesPatterns(d *RuntimeData, value string, patt
 		}
 		// If matcherTest wasn't set up (no value-patterns parsing), do simple matching
 		if c.matcherTest.match == "" {
-			ok, _, err = testString(c.comparator, MatchIs, "", value, pattern)
+			ok, _, err = testString(ctx, c.comparator, MatchIs, "", value, pattern)
 			if err != nil {
 				return false, err
 			}

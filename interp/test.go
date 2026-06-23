@@ -69,7 +69,7 @@ var allowedAddrHeaders = map[string]struct{}{
 	"x-original-to":                      {},
 }
 
-func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
+func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
 	for _, hdr := range a.Header {
 		hdr = strings.ToLower(hdr)
@@ -93,7 +93,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			}
 
 			// Try to match against empty string for empty header
-			ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
+			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
 			if err != nil {
 				return false, err
 			}
@@ -121,7 +121,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				}
 
 				// Try literal matching against the invalid address format
-				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
+				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
 				if err != nil {
 					return false, err
 				}
@@ -140,7 +140,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				}
 
 				// For failed address parsing, match against the literal value
-				ok, err := testAddress(d, a.matcherTest, a.AddressPart, cleanValue)
+				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
 				if err != nil {
 					return false, err
 				}
@@ -158,7 +158,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				}
 
 				// Try to match against empty string
-				ok, err := testAddress(d, a.matcherTest, a.AddressPart, "")
+				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
 				if err != nil {
 					return false, err
 				}
@@ -174,7 +174,7 @@ func (a AddressTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 					continue
 				}
 
-				ok, err := testAddress(d, a.matcherTest, a.AddressPart, addr.Address)
+				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, addr.Address)
 				if err != nil {
 					return false, err
 				}
@@ -233,7 +233,7 @@ type EnvelopeTest struct {
 	Field       []string
 }
 
-func (e EnvelopeTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
+func (e EnvelopeTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
 	for _, field := range e.Field {
 		var value string
@@ -268,7 +268,7 @@ func (e EnvelopeTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			continue
 		}
 
-		ok, err := testAddress(d, e.matcherTest, e.AddressPart, value)
+		ok, err := testAddress(ctx, d, e.matcherTest, e.AddressPart, value)
 		if err != nil {
 			return false, err
 		}
@@ -318,7 +318,7 @@ type HeaderTest struct {
 	Header []string
 }
 
-func (h HeaderTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
+func (h HeaderTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
 	for _, hdr := range h.Header {
 		// Use GetHeaderWithEdits to get the current header state including any edits
@@ -333,7 +333,7 @@ func (h HeaderTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
 				continue
 			}
 
-			ok, err := h.matcherTest.tryMatch(d, value)
+			ok, err := h.matcherTest.tryMatch(ctx, d, value)
 			if err != nil {
 				return false, err
 			}

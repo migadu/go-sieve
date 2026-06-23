@@ -95,7 +95,7 @@ type TestString struct {
 	Source []string
 }
 
-func (t TestString) Check(_ context.Context, d *RuntimeData) (bool, error) {
+func (t TestString) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
 	for _, source := range t.Source {
 		source = expandVars(d, source)
@@ -107,7 +107,7 @@ func (t TestString) Check(_ context.Context, d *RuntimeData) (bool, error) {
 			continue
 		}
 
-		ok, err := t.matcherTest.tryMatch(d, source)
+		ok, err := t.matcherTest.tryMatch(ctx, d, source)
 		if err != nil {
 			return false, err
 		}

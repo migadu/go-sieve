@@ -47,7 +47,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		if t.isCount() {
 			return t.countMatches(d, 1), nil
 		}
-		return t.tryMatch(d, string(rawBody))
+		return t.tryMatch(ctx, d, string(rawBody))
 	}
 
 	// For :text and :content, we need to parse the MIME structure.
@@ -63,6 +63,11 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	count := uint64(0)
 	var walk func(h message.Header, b []byte) (bool, error)
 	walk = func(h message.Header, b []byte) (bool, error) {
+		// Honour the script execution deadline while descending the MIME tree.
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
 		contentType := h.Get("Content-Type")
 		if contentType == "" {
 			contentType = "text/plain; charset=us-ascii"
@@ -108,7 +113,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 					if t.isCount() {
 						count++
 					} else {
-						match, err := t.tryMatch(d, string(b))
+						match, err := t.tryMatch(ctx, d, string(b))
 						if err != nil {
 							return false, err
 						}
@@ -176,14 +181,14 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				if t.isCount() {
 					count += 2
 				} else {
-					match, err := t.tryMatch(d, string(prologue))
+					match, err := t.tryMatch(ctx, d, string(prologue))
 					if err != nil {
 						return false, err
 					}
 					if match {
 						return true, nil
 					}
-					match, err = t.tryMatch(d, string(epilogue))
+					match, err = t.tryMatch(ctx, d, string(epilogue))
 					if err != nil {
 						return false, err
 					}
@@ -258,7 +263,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				if t.isCount() {
 					count++
 				} else {
-					match, err := t.tryMatch(d, string(hdrBytes))
+					match, err := t.tryMatch(ctx, d, string(hdrBytes))
 					if err != nil {
 						return false, err
 					}
@@ -308,7 +313,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				if t.isCount() {
 					count++
 				} else {
-					match, err := t.tryMatch(d, string(decodedBody))
+					match, err := t.tryMatch(ctx, d, string(decodedBody))
 					if err != nil {
 						return false, err
 					}

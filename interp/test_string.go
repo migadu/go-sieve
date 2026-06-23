@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -94,7 +95,7 @@ func numericValue(s string) *uint64 {
 	return &digit
 }
 
-func testString(comparator Comparator, match Match, rel Relational, value, key string) (bool, []string, error) {
+func testString(ctx context.Context, comparator Comparator, match Match, rel Relational, value, key string) (bool, []string, error) {
 	switch comparator {
 	case ComparatorOctet:
 		switch match {
@@ -103,9 +104,9 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 		case MatchIs:
 			return value == key, nil, nil
 		case MatchMatches:
-			return matchOctet(key, value, false)
+			return matchOctet(ctx, key, value, false)
 		case MatchRegex:
-			return matchRegex(key, value)
+			return matchRegex(ctx, key, value)
 		case MatchValue:
 			return rel.CompareString(value, key), nil, nil
 		case MatchCount:
@@ -141,11 +142,11 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 			key = toLowerASCII(key)
 			return value == key, nil, nil
 		case MatchMatches:
-			return matchOctet(key, value, true)
+			return matchOctet(ctx, key, value, true)
 		case MatchRegex:
 			// For case-insensitive regex, normalize value but not pattern
 			value = toLowerASCII(value)
-			return matchRegex(key, value)
+			return matchRegex(ctx, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -162,11 +163,11 @@ func testString(comparator Comparator, match Match, rel Relational, value, key s
 		case MatchIs:
 			return strings.EqualFold(value, key), nil, nil
 		case MatchMatches:
-			return matchUnicode(key, value, true)
+			return matchUnicode(ctx, key, value, true)
 		case MatchRegex:
 			// For Unicode case-insensitive regex, normalize value but not pattern
 			value = strings.ToLower(value)
-			return matchRegex(key, value)
+			return matchRegex(ctx, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -190,7 +191,7 @@ func splitSubaddress(localPart string) (user, detail string) {
 	return localPart[:idx], localPart[idx+len(SubaddressSeparator):]
 }
 
-func testAddress(d *RuntimeData, matcher matcherTest, part AddressPart, address string) (bool, error) {
+func testAddress(ctx context.Context, d *RuntimeData, matcher matcherTest, part AddressPart, address string) (bool, error) {
 	if address == "<>" {
 		address = ""
 	}
@@ -236,7 +237,7 @@ func testAddress(d *RuntimeData, matcher matcherTest, part AddressPart, address 
 		}
 	}
 
-	ok, err := matcher.tryMatch(d, valueToCompare)
+	ok, err := matcher.tryMatch(ctx, d, valueToCompare)
 	if err != nil {
 		return false, err
 	}
@@ -275,13 +276,13 @@ func toLowerASCII(s string) string {
 }
 
 // matchRegex performs safe regex matching and returns match result and capture groups
-func matchRegex(pattern, value string) (bool, []string, error) {
+func matchRegex(ctx context.Context, pattern, value string) (bool, []string, error) {
 	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
 	if err != nil {
 		return false, nil, err
 	}
 
-	matches, err := matcher.FindSubmatch(value)
+	matches, err := matcher.FindSubmatch(ctx, value)
 	if err != nil {
 		return false, nil, err
 	}

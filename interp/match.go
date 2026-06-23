@@ -1,10 +1,8 @@
 package interp
 
 import (
-	"regexp"
+	"context"
 	"strings"
-
-	"rsc.io/binaryregexp"
 )
 
 func foldASCII(b byte) byte {
@@ -60,51 +58,63 @@ func patternToRegex(pattern string, caseFold bool) string {
 	return result.String()
 }
 
-type CompiledMatcher func(value string) (bool, []string, error)
+type CompiledMatcher func(ctx context.Context, value string) (bool, []string, error)
 
 // compileMatcher returns a function that will check whether pre-defined pattern matches the passed
 // value. It is preferable to use compileMatcher over matchOctet, matchUnicode if
 // pattern does not change often (e.g. does not depend on any variables).
+//
+// The wildcard pattern is compiled once through the bounded executor
+// (SafeRegexMatcher), so the per-match execution is pattern/input/time bounded
+// and honours the caller's context.
 func compileMatcher(pattern string, octet bool, caseFold bool) (CompiledMatcher, error) {
-	if octet {
-		regex, err := binaryregexp.Compile(patternToRegex(pattern, caseFold))
-		if err != nil {
-			return nil, err
-		}
-
-		return func(value string) (bool, []string, error) {
-			matches := regex.FindStringSubmatch(value)
-			return len(matches) != 0, matches, nil
-		}, nil
-	}
-
-	regex, err := regexp.Compile(patternToRegex(pattern, caseFold))
+	matcher, err := compileBoundedMatcher(pattern, octet, caseFold)
 	if err != nil {
 		return nil, err
 	}
 
-	return func(value string) (bool, []string, error) {
-		matches := regex.FindStringSubmatch(value)
+	return func(ctx context.Context, value string) (bool, []string, error) {
+		matches, err := matcher.FindSubmatch(ctx, value)
+		if err != nil {
+			return false, nil, err
+		}
 		return len(matches) != 0, matches, nil
 	}, nil
 }
 
-func matchOctet(pattern, value string, caseFold bool) (bool, []string, error) {
-	regex, err := binaryregexp.Compile(patternToRegex(pattern, caseFold))
+// compileBoundedMatcher converts a Sieve wildcard pattern to a regex and wraps
+// it in a bounded executor, using the byte-oriented binaryregexp engine for
+// octet comparators and the Unicode stdlib regexp engine otherwise.
+func compileBoundedMatcher(pattern string, octet bool, caseFold bool) (*SafeRegexMatcher, error) {
+	regexStr := patternToRegex(pattern, caseFold)
+	if octet {
+		return compileSafeBinaryRegex(regexStr, DefaultRegexLimits)
+	}
+	return CompileSafeRegex(regexStr, DefaultRegexLimits)
+}
+
+func matchOctet(ctx context.Context, pattern, value string, caseFold bool) (bool, []string, error) {
+	matcher, err := compileSafeBinaryRegex(patternToRegex(pattern, caseFold), DefaultRegexLimits)
 	if err != nil {
 		return false, nil, err
 	}
 
-	matches := regex.FindStringSubmatch(value)
+	matches, err := matcher.FindSubmatch(ctx, value)
+	if err != nil {
+		return false, nil, err
+	}
 	return len(matches) != 0, matches, nil
 }
 
-func matchUnicode(pattern, value string, caseFold bool) (bool, []string, error) {
-	regex, err := regexp.Compile(patternToRegex(pattern, caseFold))
+func matchUnicode(ctx context.Context, pattern, value string, caseFold bool) (bool, []string, error) {
+	matcher, err := CompileSafeRegex(patternToRegex(pattern, caseFold), DefaultRegexLimits)
 	if err != nil {
 		return false, nil, err
 	}
 
-	matches := regex.FindStringSubmatch(value)
+	matches, err := matcher.FindSubmatch(ctx, value)
+	if err != nil {
+		return false, nil, err
+	}
 	return len(matches) != 0, matches, nil
 }
