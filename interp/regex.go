@@ -32,6 +32,38 @@ var DefaultRegexLimits = RegexLimits{
 	MaxInputLength:   256 * 1024,
 }
 
+// EffectiveRegexLimits fills any unset (zero) field of l from DefaultRegexLimits, so a
+// caller can override a single limit (for example MaxExecTime) and inherit the safe
+// defaults for the rest.
+func EffectiveRegexLimits(l RegexLimits) RegexLimits {
+	if l.MaxExecTime <= 0 {
+		l.MaxExecTime = DefaultRegexLimits.MaxExecTime
+	}
+	if l.MaxPatternLength <= 0 {
+		l.MaxPatternLength = DefaultRegexLimits.MaxPatternLength
+	}
+	if l.MaxInputLength <= 0 {
+		l.MaxInputLength = DefaultRegexLimits.MaxInputLength
+	}
+	return l
+}
+
+type regexLimitsCtxKey struct{}
+
+// ContextWithRegexLimits returns a context carrying the regex limits to apply to
+// matches executed under it. Script.Execute installs the script's effective limits
+// here so a single match's input truncation (MaxInputLength) and soft execution wait
+// (MaxExecTime) are configurable per execution rather than fixed at the package
+// default. MaxPatternLength is a compile-time bound and is not read from the context.
+func ContextWithRegexLimits(ctx context.Context, limits RegexLimits) context.Context {
+	return context.WithValue(ctx, regexLimitsCtxKey{}, limits)
+}
+
+func regexLimitsFromContext(ctx context.Context) (RegexLimits, bool) {
+	l, ok := ctx.Value(regexLimitsCtxKey{}).(RegexLimits)
+	return l, ok
+}
+
 // syncMatchInputThreshold is the input size below which a match runs
 // synchronously (no goroutine/timer). Header, address, and short-string tests
 // are always well under this, so they avoid the soft-timeout overhead; only
@@ -93,8 +125,24 @@ func (m *SafeRegexMatcher) FindSubmatch(ctx context.Context, input string) ([]st
 		return nil, err
 	}
 
-	if len(input) > m.limits.MaxInputLength {
-		input = input[:m.limits.MaxInputLength]
+	// MaxInputLength (truncation) and MaxExecTime (soft wait) are runtime concerns and
+	// may be overridden per execution via the context (Script.Execute installs the
+	// script's effective limits with ContextWithRegexLimits). Fall back to the limits
+	// captured at compile time when the context carries none. MaxPatternLength was
+	// already enforced at compile time and is not re-read here.
+	maxInput := m.limits.MaxInputLength
+	maxExec := m.limits.MaxExecTime
+	if l, ok := regexLimitsFromContext(ctx); ok {
+		if l.MaxInputLength > 0 {
+			maxInput = l.MaxInputLength
+		}
+		if l.MaxExecTime > 0 {
+			maxExec = l.MaxExecTime
+		}
+	}
+
+	if len(input) > maxInput {
+		input = input[:maxInput]
 	}
 
 	// Fast path: small inputs (headers, addresses, short strings) match in
@@ -108,7 +156,7 @@ func (m *SafeRegexMatcher) FindSubmatch(ctx context.Context, input string) ([]st
 	// outrun the script budget. The match goroutine runs on the truncated
 	// (bounded) input, so even if we stop waiting it completes promptly and
 	// does not leak; the buffered channels keep its send non-blocking.
-	matchCtx, cancel := context.WithTimeout(ctx, m.limits.MaxExecTime)
+	matchCtx, cancel := context.WithTimeout(ctx, maxExec)
 	defer cancel()
 
 	result := make(chan []string, 1)

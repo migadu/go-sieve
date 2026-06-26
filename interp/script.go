@@ -20,6 +20,15 @@ type Options struct {
 	MaxVariableNameLen int
 	MaxVariableLen     int
 
+	// RegexLimits bounds :matches and :regex execution: per-match input truncation
+	// (MaxInputLength) and the soft execution wait (MaxExecTime), applied to every
+	// match this script runs. Zero-valued fields fall back to DefaultRegexLimits, so a
+	// caller may override just one limit. The default 100ms MaxExecTime can be too
+	// tight for a large (but already input-bounded) body match on a loaded host or
+	// under race instrumentation; raise it here to align with the caller's overall
+	// script budget.
+	RegexLimits RegexLimits
+
 	// If specified - enables vnd.dovecot.testsuite extension
 	// and will execute tests.
 	T             *testing.T
@@ -78,6 +87,11 @@ func (s *Script) IsVarUsable(variableName string) (settable, gettable bool) {
 }
 
 func (s Script) Execute(ctx context.Context, d *RuntimeData) error {
+	// Install the script's effective regex limits so per-match input truncation and the
+	// soft execution wait are configurable per execution (see ContextWithRegexLimits).
+	if s.opts != nil {
+		ctx = ContextWithRegexLimits(ctx, EffectiveRegexLimits(s.opts.RegexLimits))
+	}
 	for _, c := range s.cmd {
 		if err := c.Execute(ctx, d); err != nil {
 			if errors.Is(err, ErrStop) {
