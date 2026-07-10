@@ -8,4 +8,6 @@ require (
 	rsc.io/binaryregexp v0.2.0
 )
 
+require golang.org/x/text v0.14.0 // indirect
+
 replace github.com/emersion/go-message => github.com/migadu/go-message v0.0.0-20260705121217-8814c0e56d68

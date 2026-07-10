@@ -333,7 +333,7 @@ func (h HeaderTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				continue
 			}
 
-			ok, err := h.matcherTest.tryMatch(ctx, d, value)
+			ok, err := h.matcherTest.tryMatch(ctx, d, decodeHeaderValue(value))
 			if err != nil {
 				return false, err
 			}

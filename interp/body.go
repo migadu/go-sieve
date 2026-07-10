@@ -16,7 +16,7 @@ import (
 
 var (
 	htmlTagRe   = regexp.MustCompile(`(?s)<[^>]*>`)
-	htmlSpaceRe = regexp.MustCompile(`\s+`)
+	htmlSpaceRe = regexp.MustCompile(`[\s\p{Zs}]+`)
 )
 
 type TestBody struct {
@@ -58,6 +58,13 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		}
 	} else {
 		hdr.Set("Content-Type", "text/plain; charset=us-ascii")
+	}
+	// Single-part messages carry their transfer encoding in the top-level
+	// header; without it the body would be matched still encoded.
+	if vals, err := d.Msg.HeaderGet("Content-Transfer-Encoding"); err == nil {
+		for _, v := range vals {
+			hdr.Add("Content-Transfer-Encoding", v)
+		}
 	}
 
 	count := uint64(0)
@@ -132,6 +139,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			// Find boundaries
 			var parts [][]byte
 			current := b
+			// A message without a MIME preamble starts directly with the
+			// first delimiter, with no preceding CRLF to search for.
+			if bytes.HasPrefix(current, []byte("--"+boundary)) {
+				parts = append(parts, nil)
+				current = current[len(boundary)+2:]
+			}
 			for {
 				idx := bytes.Index(current, dashBoundary2)
 				if idx == -1 {
@@ -292,8 +305,10 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			if process {
 				// Text part
 				// For text parts, we should decode transfer encoding if any
+				// An unknown charset is not fatal: the part is still
+				// readable and matching raw octets beats skipping it.
 				entity, err := message.New(h, bytes.NewReader(b))
-				if err != nil {
+				if err != nil && !message.IsUnknownCharset(err) {
 					return false, nil // RFC 5173: skip if text cannot be decoded
 				}
 				decodedBody, err := io.ReadAll(entity.Body)
@@ -305,9 +320,11 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 					// Very simple HTML stripping just for Sieve tests
 					stripped := htmlTagRe.ReplaceAllString(string(decodedBody), " ")
 
-					// Replace multiple spaces and trim
+					// Decode entities before collapsing whitespace so that
+					// &nbsp; (U+00A0) is normalized to a plain space too.
+					stripped = html.UnescapeString(stripped)
 					stripped = htmlSpaceRe.ReplaceAllString(stripped, " ")
-					decodedBody = []byte(strings.TrimSpace(html.UnescapeString(stripped)))
+					decodedBody = []byte(strings.TrimSpace(stripped))
 				}
 
 				if t.isCount() {

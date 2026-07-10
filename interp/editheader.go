@@ -173,7 +173,7 @@ func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 
 func (c CmdDeleteHeader) valueMatchesPatterns(ctx context.Context, d *RuntimeData, value string, patterns []string) (bool, error) {
 	// Trim leading/trailing whitespace as per RFC 5293
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(decodeHeaderValue(value))
 
 	for _, pattern := range patterns {
 		ok, err := c.matcherTest.tryMatch(ctx, d, value)
