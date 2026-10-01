@@ -178,19 +178,75 @@ func TestBodyTextSkipsStyleContent(t *testing.T) {
 	}
 }
 
-// TestBodyDecodeIsBounded: a part is decoded only up to the matcher's input
-// limit, so a needle past it does not match and the part is not copied whole.
-func TestBodyDecodeIsBounded(t *testing.T) {
+// TestBodyContainsReadsWholePart: `:contains` is not bounded by the regex
+// matcher's input limit; a newsletter's footer past 256 KB still matches.
+func TestBodyContainsReadsWholePart(t *testing.T) {
 	limit := int(DefaultRegexLimits.MaxInputLength)
-	body := strings.Repeat("x", limit+10) + "NEEDLE"
-	d := runOn(t, `require ["body", "fileinto"]; if body :contains "NEEDLE" { fileinto "hit"; }`,
-		textproto.MIMEHeader{"Content-Type": {"text/plain"}}, body)
-	if len(d.Mailboxes) != 0 {
-		t.Fatalf("matched past the %d-octet decode bound", limit)
-	}
-	d = runOn(t, `require ["body", "fileinto"]; if body :contains "NEEDLE" { fileinto "hit"; }`,
-		textproto.MIMEHeader{"Content-Type": {"text/plain"}}, strings.Repeat("x", limit-10)+"NEEDLE")
+	body := "<html><body>" + strings.Repeat("<p>x</p>", limit/8+10) + "<a>Unsubscribe</a></body></html>"
+	d := runOn(t, `require ["body", "fileinto"]; if body :text :contains "Unsubscribe" { fileinto "lists"; }`,
+		textproto.MIMEHeader{"Content-Type": {"text/html"}}, body)
 	if len(d.Mailboxes) != 1 {
-		t.Fatalf("needle within the bound did not match")
+		t.Fatalf("needle past %d octets of a text part did not match", limit)
+	}
+}
+
+func TestSplitMultipartDelimiters(t *testing.T) {
+	t.Run("boundary that prefixes a nested boundary with a hyphen", func(t *testing.T) {
+		inner := multipart("x-y", "Content-Type: text/plain\r\n\r\nplain", "Content-Type: text/html\r\n\r\n<b>html</b>")
+		body := multipart("x", "Content-Type: multipart/alternative; boundary=\"x-y\"\r\n\r\n"+inner)
+		_, parts, _ := splitMultipart([]byte(body), "x")
+		if len(parts) != 1 {
+			t.Fatalf("outer boundary split the nested part's lines: %d parts", len(parts))
+		}
+		d := runOn(t, `require ["mime", "fileinto"]; if header :mime :anychild :contenttype "Content-Type" "text/html" { fileinto "html"; }`,
+			textproto.MIMEHeader{"Content-Type": {`multipart/mixed; boundary="x"`}}, body)
+		if len(d.Mailboxes) != 1 {
+			t.Fatal("the HTML alternative was not found")
+		}
+	})
+	t.Run("part without header fields", func(t *testing.T) {
+		body := "--b\r\n\r\nplain text here\r\n--b\r\nContent-Type: text/plain\r\n\r\nsecond\r\n--b--\r\n"
+		d := runOn(t, `require ["foreverypart", "variables", "extracttext"]; set "n" ""; foreverypart { extracttext "t"; set "n" "${n}[${t}]"; }`,
+			textproto.MIMEHeader{"Content-Type": {`multipart/mixed; boundary="b"`}}, body)
+		if got, want := d.Variables["n"], "[][plain text here][second]"; got != want {
+			t.Fatalf("extracted %q, want %q", got, want)
+		}
+	})
+	t.Run("mixed line endings", func(t *testing.T) {
+		body := "--b\nContent-Type: text/plain\n\nfirst\n--b\r\nContent-Type: text/plain\r\n\r\nsecond\r\n--b--\r\n"
+		_, parts, _ := splitMultipart([]byte(body), "b")
+		if len(parts) != 2 {
+			t.Fatalf("got %d parts, want 2: %q", len(parts), parts)
+		}
+		if string(parts[0]) != "Content-Type: text/plain\n\nfirst" {
+			t.Fatalf("first part %q", parts[0])
+		}
+	})
+}
+
+// TestMimeTreeFollowsMessage: a RuntimeData whose Message is swapped parses
+// the new body rather than serving the previous message's tree.
+func TestMimeTreeFollowsMessage(t *testing.T) {
+	s := loadWith(t, `require ["mime", "fileinto"]; if header :mime :anychild :contenttype "Content-Type" "application/pdf" { fileinto "pdf"; }`)
+	hdr := textproto.MIMEHeader{"Content-Type": {`multipart/mixed; boundary="b"`}}
+	withPDF := multipart("b", "Content-Type: application/pdf\r\n\r\n%PDF")
+	withoutPDF := multipart("b", "Content-Type: text/plain\r\n\r\nhi")
+	d := NewRuntimeData(s, DummyPolicy{}, EnvelopeStatic{}, MessageStatic{Header: hdr, Body: []byte(withPDF), HasBody: true})
+	if err := s.Execute(context.Background(), d); err != nil || len(d.Mailboxes) != 1 {
+		t.Fatalf("first message: err=%v mailboxes=%v", err, d.Mailboxes)
+	}
+	d.Mailboxes = nil
+	d.Msg = MessageStatic{Header: hdr, Body: []byte(withoutPDF), HasBody: true}
+	if err := s.Execute(context.Background(), d); err != nil || len(d.Mailboxes) != 0 {
+		t.Fatalf("second message served the first message's tree: err=%v mailboxes=%v", err, d.Mailboxes)
+	}
+}
+
+func TestExtractTextUnknownCharsetIsEmpty(t *testing.T) {
+	body := multipart("b", "Content-Type: text/plain; charset=x-nonexistent\r\n\r\nhello")
+	d := runOn(t, `require ["foreverypart", "variables", "extracttext"]; set "n" ""; foreverypart { extracttext "t"; set "n" "${n}[${t}]"; }`,
+		textproto.MIMEHeader{"Content-Type": {`multipart/mixed; boundary="b"`}}, body)
+	if got, want := d.Variables["n"], "[][]"; got != want {
+		t.Fatalf("extracted %q, want %q (RFC 5703 §7: unknown charset yields an empty string)", got, want)
 	}
 }

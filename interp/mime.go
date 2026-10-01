@@ -28,6 +28,10 @@ type mimePart struct {
 	header   textproto.MIMEHeader // sub-parts only
 	body     []byte               // raw, still transfer-encoded
 	children []*mimePart
+
+	// extracttext's view of the part, computed once per evaluation.
+	textCached bool
+	textValue  string
 }
 
 // subtree returns p and every part nested in it, depth first, which is the
@@ -59,9 +63,20 @@ func (p *mimePart) firstHeader(d *RuntimeData, name string) string {
 
 // text returns the part's content as extracttext stores it (RFC 5703 §7):
 // transfer encoding removed, text transcoded to UTF-8 and HTML reduced to its
-// text, which is what Pigeonhole does. A part holding other parts yields "",
-// as does content that cannot be decoded. At most limit octets are decoded.
+// text. A part holding other parts yields "", as does one whose charset is
+// unknown (§7: "an empty string will result"). A non-text leaf is stored
+// decoded, as Pigeonhole does: its decoder only returns raw binary when asked
+// to, and Pigeonhole does not ask, so the content goes through its UTF-8
+// translation instead. At most limit octets are decoded.
 func (p *mimePart) text(d *RuntimeData, limit int64) string {
+	if !p.textCached {
+		p.textValue = p.decodeText(d, limit)
+		p.textCached = true
+	}
+	return p.textValue
+}
+
+func (p *mimePart) decodeText(d *RuntimeData, limit int64) string {
 	if len(p.children) > 0 {
 		return ""
 	}
@@ -75,32 +90,34 @@ func (p *mimePart) text(d *RuntimeData, limit int64) string {
 		h.Set("Content-Transfer-Encoding", cte)
 	}
 	entity, err := message.New(h, bytes.NewReader(p.body))
-	if err != nil && !message.IsUnknownCharset(err) {
+	if err != nil {
 		return ""
 	}
 	decoded, err := io.ReadAll(io.LimitReader(entity.Body, limit))
 	if err != nil {
 		return ""
 	}
+	text := strings.ToValidUTF8(string(decoded), "\uFFFD")
 	mediaType, _ := parseMediaTypeLenient(contentType)
 	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
-		return htmlToText(string(decoded))
+		return htmlToText(text)
 	}
-	return string(decoded)
+	return text
 }
 
-// mimeTree parses the message's MIME structure once per evaluation. The body
-// does not change during a run; the root's headers are not copied, so header
-// edits are seen either way.
+// mimeTree parses the message's MIME structure once per message. The tree is
+// kept for as long as the Message hands out the same body; a caller that
+// swaps d.Msg gets a fresh parse. The root's headers are not copied, so
+// header edits are seen either way.
 func (d *RuntimeData) mimeTree() (*mimePart, error) {
-	if d.mimeRoot != nil {
-		return d.mimeRoot, nil
-	}
-	root := &mimePart{root: true}
 	body, hasBody, err := d.Msg.BodyRaw()
 	if err != nil {
 		return nil, err
 	}
+	if d.mimeRoot != nil && sameBytes(d.mimeRoot.body, body) {
+		return d.mimeRoot, nil
+	}
+	root := &mimePart{root: true}
 	if hasBody {
 		root.body = body
 		count := 1
@@ -108,6 +125,14 @@ func (d *RuntimeData) mimeTree() (*mimePart, error) {
 	}
 	d.mimeRoot = root
 	return root, nil
+}
+
+// sameBytes reports whether a and b are the same slice of the same array.
+func sameBytes(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
 }
 
 // currentPart is the part a running foreverypart has reached, or nil outside
@@ -180,8 +205,10 @@ func parseMediaTypeLenient(v string) (string, map[string]string) {
 // returns the prologue, each part (header and body, with the delimiter's line
 // ending removed) and the epilogue.
 func splitMultipart(b []byte, boundary string) (prologue []byte, parts [][]byte, epilogue []byte) {
+	// One scan for the LF form; a CR before it belongs to the delimiter too.
+	// Scanning for the CRLF form first would skip an earlier bare-LF
+	// delimiter in a body with mixed line endings.
 	dashBoundary := []byte("\n--" + boundary)
-	dashBoundary2 := []byte("\r\n--" + boundary)
 
 	var chunks [][]byte
 	current := b
@@ -192,19 +219,17 @@ func splitMultipart(b []byte, boundary string) (prologue []byte, parts [][]byte,
 		current = current[len(boundary)+2:]
 	}
 	for {
-		idx := indexDelimiter(current, dashBoundary2)
+		idx := indexDelimiter(current, dashBoundary)
 		if idx == -1 {
-			idx = indexDelimiter(current, dashBoundary)
-			if idx == -1 {
-				chunks = append(chunks, current)
-				break
-			}
-			chunks = append(chunks, current[:idx])
-			current = current[idx+len(dashBoundary):]
-		} else {
-			chunks = append(chunks, current[:idx])
-			current = current[idx+len(dashBoundary2):]
+			chunks = append(chunks, current)
+			break
 		}
+		chunk := current[:idx]
+		if len(chunk) > 0 && chunk[len(chunk)-1] == '\r' {
+			chunk = chunk[:len(chunk)-1]
+		}
+		chunks = append(chunks, chunk)
+		current = current[idx+len(dashBoundary):]
 	}
 
 	prologue = chunks[0]
@@ -250,34 +275,35 @@ func indexDelimiter(b, delim []byte) int {
 
 // delimiterEnds reports whether what follows a boundary at offset end can end
 // a delimiter line: the line ending, the closing "--", trailing whitespace, or
-// the end of the body.
+// the end of the body. A single "-" cannot: "x-y" is a different boundary.
 func delimiterEnds(b []byte, end int) bool {
 	if end >= len(b) {
 		return true
 	}
 	switch b[end] {
-	case '\r', '\n', '-', ' ', '\t':
+	case '\r', '\n', ' ', '\t':
 		return true
+	case '-':
+		return end+1 < len(b) && b[end+1] == '-'
 	}
 	return false
 }
 
 // parsePartHeader splits a MIME part into its header and body. The body is
-// nil when the part has no blank line.
+// what follows the blank line the header reader stopped at, so a part with no
+// header fields (RFC 2046 §5.1 allows one) still yields its body; it is nil
+// when the part has no blank line at all.
 func parsePartHeader(p []byte) (textproto.MIMEHeader, []byte, error) {
-	r := textproto.NewReader(bufio.NewReader(bytes.NewReader(p)))
-	hdr, err := r.ReadMIMEHeader()
+	br := bytes.NewReader(p)
+	buf := bufio.NewReader(br)
+	hdr, err := textproto.NewReader(buf).ReadMIMEHeader()
 	if err != nil && err != io.EOF {
 		return nil, nil, err
 	}
-
-	var body []byte
-	if idx := bytes.Index(p, []byte("\r\n\r\n")); idx != -1 {
-		body = p[idx+4:]
-	} else if idx := bytes.Index(p, []byte("\n\n")); idx != -1 {
-		body = p[idx+2:]
+	if err == io.EOF {
+		return hdr, nil, nil
 	}
-	return hdr, body, nil
+	return hdr, p[len(p)-buf.Buffered()-br.Len():], nil
 }
 
 // decodeInputLimit is how many octets of a decoded part are read for matching

@@ -15,10 +15,8 @@ func (c CmdIf) Execute(ctx context.Context, d *RuntimeData) error {
 		return err
 	}
 	if res {
-		for _, c := range c.Block {
-			if err := c.Execute(ctx, d); err != nil {
-				return err
-			}
+		if err := runBlock(ctx, d, c.Block); err != nil {
+			return err
 		}
 	}
 	d.ifResult = res
@@ -39,10 +37,8 @@ func (c CmdElsif) Execute(ctx context.Context, d *RuntimeData) error {
 		return err
 	}
 	if res {
-		for _, c := range c.Block {
-			if err := c.Execute(ctx, d); err != nil {
-				return err
-			}
+		if err := runBlock(ctx, d, c.Block); err != nil {
+			return err
 		}
 	}
 	d.ifResult = res
@@ -57,10 +53,5 @@ func (c CmdElse) Execute(ctx context.Context, d *RuntimeData) error {
 	if d.ifResult {
 		return nil
 	}
-	for _, c := range c.Block {
-		if err := c.Execute(ctx, d); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runBlock(ctx, d, c.Block)
 }

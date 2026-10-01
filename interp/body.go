@@ -1,13 +1,11 @@
 package interp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"html"
 	"io"
 	"mime"
-	"net/textproto"
 	"regexp"
 	"strings"
 
@@ -199,25 +197,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			}
 		} else if mediaType == "message/rfc822" {
 			// RFC 5173: match against the header of the nested message
-			r := textproto.NewReader(bufio.NewReader(bytes.NewReader(b)))
-			nestedHdr, err := r.ReadMIMEHeader()
+			nestedHdr, nestedBody, err := parsePartHeader(b)
 
-			// Extract header bytes exactly as they appear
-			var hdrBytes []byte
-			idx := bytes.Index(b, []byte("\r\n\r\n"))
-			var nestedBody []byte
-			if idx != -1 {
-				hdrBytes = b[:idx+2] // include the last \r\n of the header block but not the blank line
-				nestedBody = b[idx+4:]
-			} else {
-				idx = bytes.Index(b, []byte("\n\n"))
-				if idx != -1 {
-					hdrBytes = b[:idx+1]
-					nestedBody = b[idx+2:]
-				} else {
-					hdrBytes = b
-					nestedBody = nil
-				}
+			// The header block as it appears, without the blank line.
+			hdrBytes := b
+			if nestedBody != nil {
+				hdrBytes = bytes.TrimSuffix(bytes.TrimSuffix(b[:len(b)-len(nestedBody)], []byte("\n")), []byte("\r"))
 			}
 
 			if process {
@@ -234,7 +219,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				}
 			}
 
-			if err == nil || err == io.EOF {
+			if err == nil {
 				mh := message.Header{}
 				for k, vv := range nestedHdr {
 					for _, v := range vv {
@@ -259,9 +244,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				if err != nil && !message.IsUnknownCharset(err) {
 					return false, nil // RFC 5173: skip if text cannot be decoded
 				}
-				// Bounded like the matcher's own input: a part larger than
-				// the match limit is neither decoded nor copied in full.
-				decodedBody, err := io.ReadAll(io.LimitReader(entity.Body, decodeInputLimit(ctx)))
+				decodedBody, err := io.ReadAll(entity.Body)
 				if err != nil {
 					return false, nil
 				}
