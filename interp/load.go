@@ -30,6 +30,11 @@ var supportedRequires = map[string]struct{}{
 	"mailbox":    {}, // RFC5490 - Mailbox Extension
 	"subaddress": {}, // RFC5233 - Subaddress Extension
 	"body":       {}, // RFC5173 - Body Extension
+	// RFC5703 - MIME Part Tests, Iteration, Extraction (Pigeonhole's subset:
+	// no replace, no enclose)
+	"mime":         {},
+	"foreverypart": {},
+	"extracttext":  {},
 }
 
 var (
@@ -62,6 +67,10 @@ func init() {
 		// RFC 5293 (editheader extension)
 		"addheader":    loadAddHeader,
 		"deleteheader": loadDeleteHeader,
+		// RFC 5703 (foreverypart, extracttext extensions)
+		"foreverypart": loadForEveryPart,
+		"break":        loadBreak,
+		"extracttext":  loadExtractText,
 		// vnd.dovecot.testsuite
 		"test":             loadDovecotTest,
 		"test_set":         loadDovecotTestSet,

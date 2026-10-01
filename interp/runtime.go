@@ -69,6 +69,11 @@ type RuntimeData struct {
 	// Vacation extension state
 	VacationResponses map[string]VacationResponse
 
+	// MIME part tree (RFC 5703), parsed on first use, and the parts the
+	// running foreverypart loops have reached, innermost last.
+	mimeRoot  *mimePart
+	partStack []*mimePart
+
 	// vnd.dovecot.testsuit state
 	testName        string
 	testFailMessage string // if set - test failed.
@@ -93,6 +98,8 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		FlagAliases:     make(map[string]string, len(d.FlagAliases)),
 		MatchVariables:  make([]string, len(d.MatchVariables)),
 		Variables:       make(map[string]string, len(d.Variables)),
+		mimeRoot:        d.mimeRoot,
+		partStack:       append([]*mimePart(nil), d.partStack...),
 		testName:        d.testName,
 		testFailMessage: d.testFailMessage,
 		testFailAt:      d.testFailAt,

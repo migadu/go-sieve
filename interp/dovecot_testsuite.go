@@ -209,6 +209,7 @@ func (c CmdDovecotTestSet) Execute(_ context.Context, d *RuntimeData) error {
 			Body:    bodyBytes,
 			HasBody: hdrErr != io.EOF,
 		}
+		d.mimeRoot = nil
 	case "envelope.from":
 		parsedAddr, err := parseEnvelopeAddress(value)
 		if err != nil {

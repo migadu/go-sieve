@@ -40,6 +40,10 @@ type Script struct {
 	cmd               []Cmd
 	enabledExtensions []string
 
+	// loops names the foreverypart commands enclosing the code being
+	// loaded, innermost last, so break can resolve its target at load time.
+	loops []string
+
 	opts *Options
 }
 

@@ -13,100 +13,10 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 		return nil, parser.ErrorAt(pcmd.Position, "missing require 'variables'")
 	}
 	cmd := CmdSet{}
+	var mods valueModifiers
 
-	// by precedence
-	var modifiers = map[int]func(string) string{}
-	var conflictingMods bool
-
-	err := LoadSpec(script, &Spec{
-		Tags: map[string]SpecTag{
-			"length": {
-				MatchBool: func() {
-					if modifiers[10] != nil {
-						conflictingMods = true
-					}
-					modifiers[10] = func(s string) string {
-						// RFC mentions `characters' and not octets
-						return strconv.Itoa(len([]rune(s)))
-					}
-				},
-			},
-			"quotewildcard": {
-				MatchBool: func() {
-					if modifiers[20] != nil {
-						conflictingMods = true
-					}
-					modifiers[20] = func(s string) string {
-						escaped := strings.Builder{}
-						escaped.Grow(len(s))
-						for _, chr := range s {
-							switch chr {
-							case '\\', '*', '?':
-								escaped.WriteByte('\\')
-								escaped.WriteRune(chr)
-							default:
-								escaped.WriteRune(chr)
-							}
-						}
-						return escaped.String()
-					}
-				},
-			},
-			"upper": {
-				MatchBool: func() {
-					if modifiers[40] != nil {
-						conflictingMods = true
-					}
-					modifiers[40] = func(s string) string {
-						return strings.ToUpper(s)
-					}
-				},
-			},
-			"lower": {
-				MatchBool: func() {
-					if modifiers[40] != nil {
-						conflictingMods = true
-					}
-					modifiers[40] = func(s string) string {
-						return strings.ToLower(s)
-					}
-				},
-			},
-			"upperfirst": {
-				MatchBool: func() {
-					if modifiers[30] != nil {
-						conflictingMods = true
-					}
-					modifiers[30] = func(s string) string {
-						if len(s) == 0 {
-							return s
-						}
-						first := s[0]
-						if first >= 'a' && first <= 'z' {
-							first -= 'a' - 'A'
-						}
-						return string(first) + s[1:]
-					}
-				},
-			},
-			"lowerfirst": {
-				MatchBool: func() {
-					if modifiers[30] != nil {
-						conflictingMods = true
-					}
-					modifiers[30] = func(s string) string {
-						if len(s) == 0 {
-							return s
-						}
-						first := s[0]
-						if first >= 'A' && first <= 'Z' {
-							first += 'a' - 'A'
-						}
-						return string(first) + s[1:]
-					}
-				},
-			},
-		},
+	spec := &Spec{
+		Tags: map[string]SpecTag{},
 		Pos: []SpecPosArg{
 			{
 				MinStrCount: 1,
@@ -123,9 +33,11 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 				},
 			},
 		},
-	}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	}
+	mods.addSpecTags(spec.Tags)
+	err := LoadSpec(script, spec, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
 
-	if conflictingMods {
+	if mods.conflicting {
 		return nil, parser.ErrorAt(pcmd.Position, "conflicting value modifiers")
 	}
 
@@ -134,10 +46,100 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 		return nil, parser.ErrorAt(pcmd.Position, "cannot set this variable")
 	}
 
-	cmd.ModifyValue = func(s string) string {
+	cmd.ModifyValue = mods.apply(script)
+
+	return cmd, err
+}
+
+// valueModifiers collects a command's RFC 5229 §4.4 value modifiers (:lower,
+// :length, ...) and applies them in precedence order. set and extracttext
+// share it.
+type valueModifiers struct {
+	byPrecedence map[int]func(string) string
+	conflicting  bool // two modifiers of the same precedence were given
+}
+
+func (m *valueModifiers) addSpecTags(tags map[string]SpecTag) {
+	m.byPrecedence = map[int]func(string) string{}
+	set := func(prec int, f func(string) string) {
+		if m.byPrecedence[prec] != nil {
+			m.conflicting = true
+		}
+		m.byPrecedence[prec] = f
+	}
+	tags["length"] = SpecTag{
+		MatchBool: func() {
+			set(10, func(s string) string {
+				// RFC mentions `characters' and not octets
+				return strconv.Itoa(len([]rune(s)))
+			})
+		},
+	}
+	tags["quotewildcard"] = SpecTag{
+		MatchBool: func() {
+			set(20, func(s string) string {
+				escaped := strings.Builder{}
+				escaped.Grow(len(s))
+				for _, chr := range s {
+					switch chr {
+					case '\\', '*', '?':
+						escaped.WriteByte('\\')
+						escaped.WriteRune(chr)
+					default:
+						escaped.WriteRune(chr)
+					}
+				}
+				return escaped.String()
+			})
+		},
+	}
+	tags["upper"] = SpecTag{
+		MatchBool: func() {
+			set(40, strings.ToUpper)
+		},
+	}
+	tags["lower"] = SpecTag{
+		MatchBool: func() {
+			set(40, strings.ToLower)
+		},
+	}
+	tags["upperfirst"] = SpecTag{
+		MatchBool: func() {
+			set(30, func(s string) string {
+				if len(s) == 0 {
+					return s
+				}
+				first := s[0]
+				if first >= 'a' && first <= 'z' {
+					first -= 'a' - 'A'
+				}
+				return string(first) + s[1:]
+			})
+		},
+	}
+	tags["lowerfirst"] = SpecTag{
+		MatchBool: func() {
+			set(30, func(s string) string {
+				if len(s) == 0 {
+					return s
+				}
+				first := s[0]
+				if first >= 'A' && first <= 'Z' {
+					first += 'a' - 'A'
+				}
+				return string(first) + s[1:]
+			})
+		},
+	}
+}
+
+// apply returns the function that runs the modifiers over a value, bounded to
+// script's variable length limit.
+func (m *valueModifiers) apply(script *Script) func(string) string {
+	return func(s string) string {
 		lastPrec := 9999
 		for _, prec := range [4]int{40, 30, 20, 10} {
-			fun := modifiers[prec]
+			fun := m.byPrecedence[prec]
 			if fun != nil {
 				s = fun(s)
 				lastPrec = prec
@@ -169,8 +171,6 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 
 		return s
 	}
-
-	return cmd, err
 }
 
 func loadStringTest(s *Script, test parser.Test) (Test, error) {

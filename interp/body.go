@@ -17,7 +17,26 @@ import (
 var (
 	htmlTagRe   = regexp.MustCompile(`(?s)<[^>]*>`)
 	htmlSpaceRe = regexp.MustCompile(`[\s\p{Zs}]+`)
+	// Script and style elements carry nothing a reader sees, so their content
+	// goes with their tags; Pigeonhole's converter drops them too.
+	// An unterminated element runs to the end, as browsers treat it.
+	htmlScriptRe = regexp.MustCompile(`(?is)<script\b[^>]*>.*?(</script\s*>|\z)`)
+	htmlStyleRe  = regexp.MustCompile(`(?is)<style\b[^>]*>.*?(</style\s*>|\z)`)
 )
+
+// htmlToText reduces HTML to the text a reader sees: script and style
+// elements are removed with their content, tags become spaces, character
+// references are decoded, and runs of whitespace collapse to one space.
+func htmlToText(s string) string {
+	s = htmlScriptRe.ReplaceAllString(s, " ")
+	s = htmlStyleRe.ReplaceAllString(s, " ")
+	s = htmlTagRe.ReplaceAllString(s, " ")
+	// Decode references before collapsing whitespace so that &nbsp; (U+00A0)
+	// is normalized to a plain space too.
+	s = html.UnescapeString(s)
+	s = htmlSpaceRe.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
 
 type TestBody struct {
 	matcherTest
@@ -132,62 +151,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				return false, nil
 			}
 
-			// Split by boundary
-			dashBoundary := []byte("\n--" + boundary)
-			dashBoundary2 := []byte("\r\n--" + boundary)
-
-			// Find boundaries
-			var parts [][]byte
-			current := b
-			// A message without a MIME preamble starts directly with the
-			// first delimiter, with no preceding CRLF to search for.
-			if bytes.HasPrefix(current, []byte("--"+boundary)) {
-				parts = append(parts, nil)
-				current = current[len(boundary)+2:]
-			}
-			for {
-				idx := bytes.Index(current, dashBoundary2)
-				if idx == -1 {
-					idx = bytes.Index(current, dashBoundary)
-					if idx == -1 {
-						parts = append(parts, current)
-						break
-					} else {
-						parts = append(parts, current[:idx])
-						current = current[idx+len(dashBoundary):]
-					}
-				} else {
-					parts = append(parts, current[:idx])
-					current = current[idx+len(dashBoundary2):]
-				}
-			}
-
-			// parts[0] is prologue
-			prologue := parts[0]
-			epilogue := []byte{}
-
-			var nested [][]byte
-			for i := 1; i < len(parts); i++ {
-				p := parts[i]
-				if bytes.HasPrefix(p, []byte("--")) {
-					// End boundary
-					epilogue = p[2:]
-					// Skip leading newline in epilogue if present
-					if bytes.HasPrefix(epilogue, []byte("\r\n")) {
-						epilogue = epilogue[2:]
-					} else if bytes.HasPrefix(epilogue, []byte("\n")) {
-						epilogue = epilogue[1:]
-					}
-					break
-				}
-				// Skip leading newline from boundary match
-				if bytes.HasPrefix(p, []byte("\r\n")) {
-					p = p[2:]
-				} else if bytes.HasPrefix(p, []byte("\n")) {
-					p = p[1:]
-				}
-				nested = append(nested, p)
-			}
+			prologue, nested, epilogue := splitMultipart(b, boundary)
 
 			if process {
 				// Search prologue and epilogue
@@ -213,25 +177,9 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 
 			// Descend into nested parts
 			for _, p := range nested {
-				// Parse headers for nested part
-				r := textproto.NewReader(bufio.NewReader(bytes.NewReader(p)))
-				partHdr, err := r.ReadMIMEHeader()
-				if err != nil && err != io.EOF {
+				partHdr, partBody, err := parsePartHeader(p)
+				if err != nil {
 					continue
-				}
-
-				// Read until the first blank line to find the body
-				idx := bytes.Index(p, []byte("\r\n\r\n"))
-				var partBody []byte
-				if idx != -1 {
-					partBody = p[idx+4:]
-				} else {
-					idx = bytes.Index(p, []byte("\n\n"))
-					if idx != -1 {
-						partBody = p[idx+2:]
-					} else {
-						partBody = nil
-					}
 				}
 
 				mh := message.Header{}
@@ -311,20 +259,15 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				if err != nil && !message.IsUnknownCharset(err) {
 					return false, nil // RFC 5173: skip if text cannot be decoded
 				}
-				decodedBody, err := io.ReadAll(entity.Body)
+				// Bounded like the matcher's own input: a part larger than
+				// the match limit is neither decoded nor copied in full.
+				decodedBody, err := io.ReadAll(io.LimitReader(entity.Body, decodeInputLimit(ctx)))
 				if err != nil {
 					return false, nil
 				}
 
 				if t.text && (mediaType == "text/html" || mediaType == "application/xhtml+xml") {
-					// Very simple HTML stripping just for Sieve tests
-					stripped := htmlTagRe.ReplaceAllString(string(decodedBody), " ")
-
-					// Decode entities before collapsing whitespace so that
-					// &nbsp; (U+00A0) is normalized to a plain space too.
-					stripped = html.UnescapeString(stripped)
-					stripped = htmlSpaceRe.ReplaceAllString(stripped, " ")
-					decodedBody = []byte(strings.TrimSpace(stripped))
+					decodedBody = []byte(htmlToText(string(decodedBody)))
 				}
 
 				if t.isCount() {

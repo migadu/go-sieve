@@ -29,6 +29,7 @@ type AddressTest struct {
 	AddressPart    AddressPart
 	AddressPartCnt int // Counter to detect duplicate address parts
 	Header         []string
+	mime           mimeTestOpts // RFC 5703 §4.2
 }
 
 var allowedAddrHeaders = map[string]struct{}{
@@ -71,6 +72,34 @@ var allowedAddrHeaders = map[string]struct{}{
 
 func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
+	if a.mime.enabled {
+		// RFC 5703 §4.2: any MIME header of the parts in scope is parsed as
+		// an address header, so the address-header list does not apply.
+		parts, err := a.mime.scope(d)
+		if err != nil {
+			return false, err
+		}
+		for _, part := range parts {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			for _, hdr := range a.Header {
+				values, err := part.headerValues(d, expandVars(d, hdr))
+				if err != nil {
+					return false, err
+				}
+				ok, err := a.matchValues(ctx, d, values, &entryCount)
+				if err != nil || ok {
+					return ok, err
+				}
+			}
+		}
+		if a.isCount() {
+			return a.countMatches(d, entryCount), nil
+		}
+		return false, nil
+	}
+
 	for _, hdr := range a.Header {
 		hdr = strings.ToLower(hdr)
 		hdr = expandVars(d, hdr)
@@ -85,14 +114,88 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			return false, err
 		}
 
-		// Handle case where header exists but has no values (empty header)
-		if len(values) == 0 {
+		ok, err := a.matchValues(ctx, d, values, &entryCount)
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+
+	if a.isCount() {
+		return a.countMatches(d, entryCount), nil
+	}
+
+	return false, nil
+}
+
+// matchValues tests one header's values. In :count mode it adds the addresses
+// found to *entryCount instead of matching.
+func (a AddressTest) matchValues(ctx context.Context, d *RuntimeData, values []string, entryCount *uint64) (bool, error) {
+	// Handle case where header exists but has no values (empty header)
+	if len(values) == 0 {
+		if a.isCount() {
+			// No addresses to count for this header
+			return false, nil
+		}
+
+		// Try to match against empty string for empty header
+		return testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
+	}
+
+	for _, value := range values {
+		// Strip RFC 2822 comments before parsing
+		cleanValue := stripRFC2822Comments(value)
+
+		// Check for invalid angle bracket usage (bare angle brackets without display name)
+		// Pattern like "<email@domain.com>" without preceding display name is invalid
+		trimmed := strings.TrimSpace(cleanValue)
+		hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") &&
+			strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
+
+		if hasBareAngleBrackets {
+			// Bare angle brackets are invalid for address parsing, but for :all we can match literally
 			if a.isCount() {
-				// No addresses to count for this header
+				// For count mode, invalid addresses don't count
 				continue
 			}
 
-			// Try to match against empty string for empty header
+			// Try literal matching against the invalid address format
+			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return true, nil
+			}
+			continue
+		}
+
+		addrList, err := mail.ParseAddressList(cleanValue)
+		if err != nil {
+			// If parsing fails, try matching against the literal header value
+			if a.isCount() {
+				// For count mode, non-parseable addresses don't count
+				continue
+			}
+
+			// For failed address parsing, match against the literal value
+			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return true, nil
+			}
+			continue
+		}
+
+		// Handle empty address list (empty header value)
+		if len(addrList) == 0 {
+			if a.isCount() {
+				// No addresses to count
+				continue
+			}
+
+			// Try to match against empty string
 			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
 			if err != nil {
 				return false, err
@@ -103,90 +206,20 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			continue
 		}
 
-		for _, value := range values {
-			// Strip RFC 2822 comments before parsing
-			cleanValue := stripRFC2822Comments(value)
-
-			// Check for invalid angle bracket usage (bare angle brackets without display name)
-			// Pattern like "<email@domain.com>" without preceding display name is invalid
-			trimmed := strings.TrimSpace(cleanValue)
-			hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") &&
-				strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
-
-			if hasBareAngleBrackets {
-				// Bare angle brackets are invalid for address parsing, but for :all we can match literally
-				if a.isCount() {
-					// For count mode, invalid addresses don't count
-					continue
-				}
-
-				// Try literal matching against the invalid address format
-				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					return true, nil
-				}
+		for _, addr := range addrList {
+			if a.isCount() {
+				*entryCount++
 				continue
 			}
 
-			addrList, err := mail.ParseAddressList(cleanValue)
+			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, addr.Address)
 			if err != nil {
-				// If parsing fails, try matching against the literal header value
-				if a.isCount() {
-					// For count mode, non-parseable addresses don't count
-					continue
-				}
-
-				// For failed address parsing, match against the literal value
-				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					return true, nil
-				}
-				continue
+				return false, err
 			}
-
-			// Handle empty address list (empty header value)
-			if len(addrList) == 0 {
-				if a.isCount() {
-					// No addresses to count
-					continue
-				}
-
-				// Try to match against empty string
-				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					return true, nil
-				}
-				continue
-			}
-
-			for _, addr := range addrList {
-				if a.isCount() {
-					entryCount++
-					continue
-				}
-
-				ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, addr.Address)
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					return true, nil
-				}
+			if ok {
+				return true, nil
 			}
 		}
-	}
-
-	if a.isCount() {
-		return a.countMatches(d, entryCount), nil
 	}
 
 	return false, nil
@@ -284,9 +317,36 @@ func (e EnvelopeTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 
 type ExistsTest struct {
 	Fields []string
+	mime   mimeTestOpts // RFC 5703 §4.3
 }
 
 func (e ExistsTest) Check(_ context.Context, d *RuntimeData) (bool, error) {
+	if e.mime.enabled {
+		// Each field must exist in some part in scope; Pigeonhole does not
+		// require one part to carry all of them.
+		parts, err := e.mime.scope(d)
+		if err != nil {
+			return false, err
+		}
+		for _, field := range e.Fields {
+			found := false
+			for _, part := range parts {
+				values, err := part.headerValues(d, expandVars(d, field))
+				if err != nil {
+					return false, err
+				}
+				if len(values) > 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+
 	for _, field := range e.Fields {
 		// Use GetHeaderWithEdits to get the current header state including any edits
 		values, err := GetHeaderWithEdits(d, expandVars(d, field))
@@ -316,10 +376,49 @@ type HeaderTest struct {
 	matcherTest
 
 	Header []string
+	mime   mimeTestOpts // RFC 5703 §4.1
 }
 
 func (h HeaderTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	entryCount := uint64(0)
+	if h.mime.enabled {
+		parts, err := h.mime.scope(d)
+		if err != nil {
+			return false, err
+		}
+		params := expandVarsList(d, h.mime.params)
+		for _, part := range parts {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			for _, hdr := range h.Header {
+				name := expandVars(d, hdr)
+				raw, err := part.headerValues(d, name)
+				if err != nil {
+					return false, err
+				}
+				values, n := h.mime.values(name, raw, params)
+				if h.isCount() {
+					entryCount += n
+					continue
+				}
+				for _, value := range values {
+					ok, err := h.matcherTest.tryMatch(ctx, d, value)
+					if err != nil {
+						return false, err
+					}
+					if ok {
+						return true, nil
+					}
+				}
+			}
+		}
+		if h.isCount() {
+			return h.countMatches(d, entryCount), nil
+		}
+		return false, nil
+	}
+
 	for _, hdr := range h.Header {
 		// Use GetHeaderWithEdits to get the current header state including any edits
 		values, err := GetHeaderWithEdits(d, expandVars(d, hdr))

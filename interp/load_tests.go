@@ -13,7 +13,7 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 	}
 	var key []string
 	var useSubaddress bool
-	err := LoadSpec(s, loaded.addSpecTags(&Spec{
+	spec := loaded.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
 			"all": {
 				MatchBool: func() {
@@ -63,12 +63,17 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 				MinStrCount: 1,
 			},
 		},
-	}), test.Position, test.Args, test.Tests, nil)
+	})
+	loaded.mime.addSpecTags(spec.Tags, false)
+	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := loaded.setKey(s, key); err != nil {
+		return nil, err
+	}
+	if err := loaded.mime.validate(s, test.Position); err != nil {
 		return nil, err
 	}
 
@@ -182,7 +187,8 @@ func loadEnvelopeTest(s *Script, test parser.Test) (Test, error) {
 
 func loadExistsTest(s *Script, test parser.Test) (Test, error) {
 	loaded := ExistsTest{}
-	err := LoadSpec(s, &Spec{
+	spec := &Spec{
+		Tags: map[string]SpecTag{},
 		Pos: []SpecPosArg{
 			{
 				MatchStr: func(val []string) {
@@ -191,8 +197,15 @@ func loadExistsTest(s *Script, test parser.Test) (Test, error) {
 				MinStrCount: 1,
 			},
 		},
-	}, test.Position, test.Args, test.Tests, nil)
-	return loaded, err
+	}
+	loaded.mime.addSpecTags(spec.Tags, false)
+	if err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil); err != nil {
+		return nil, err
+	}
+	if err := loaded.mime.validate(s, test.Position); err != nil {
+		return nil, err
+	}
+	return loaded, nil
 }
 
 func loadFalseTest(s *Script, test parser.Test) (Test, error) {
@@ -210,7 +223,7 @@ func loadTrueTest(s *Script, test parser.Test) (Test, error) {
 func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 	loaded := HeaderTest{matcherTest: newMatcherTest()}
 	var key []string
-	err := LoadSpec(s, loaded.addSpecTags(&Spec{
+	spec := loaded.addSpecTags(&Spec{
 		Pos: []SpecPosArg{
 			{
 				MatchStr: func(val []string) {
@@ -225,12 +238,17 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 				MinStrCount: 1,
 			},
 		},
-	}), test.Position, test.Args, test.Tests, nil)
+	})
+	loaded.mime.addSpecTags(spec.Tags, true)
+	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := loaded.setKey(s, key); err != nil {
+		return nil, err
+	}
+	if err := loaded.mime.validate(s, test.Position); err != nil {
 		return nil, err
 	}
 

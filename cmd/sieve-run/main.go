@@ -51,6 +51,7 @@ func main() {
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
 		"date", "index", "editheader", "mailbox", "subaddress",
+		"mime", "foreverypart", "extracttext",
 	}
 	loadedScript, err := sieve.Load(script, opts)
 	end := time.Now()

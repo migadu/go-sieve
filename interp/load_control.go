@@ -54,6 +54,12 @@ func loadRequire(s *Script, pcmd parser.Cmd) (Cmd, error) {
 
 		s.extensions[ext] = struct{}{}
 	}
+
+	// extracttext is only usable with both of these (RFC 5703 §8), and
+	// Pigeonhole rejects the require itself without them.
+	if s.RequiresExtension("extracttext") && (!s.RequiresExtension("variables") || !s.RequiresExtension("foreverypart")) {
+		return nil, fmt.Errorf("extension 'extracttext' requires 'variables' and 'foreverypart'")
+	}
 	return nil, nil
 }
 
