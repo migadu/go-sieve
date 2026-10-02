@@ -34,11 +34,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	}
 
 	if t.raw {
-		// For :raw, the whole raw body is treated as a single string.
+		// For :raw, the whole raw body is treated as a single string, matched
+		// as it is read rather than copied.
 		if t.isCount() {
 			return t.countMatches(d, 1), nil
 		}
-		return t.tryMatch(ctx, d, string(rawBody))
+		return t.matchStream(ctx, d, bytes.NewReader(rawBody))
 	}
 
 	// For :text and :content, we need to parse the MIME structure.
@@ -211,7 +212,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		} else {
 			if process {
 				if t.isCount() {
-					count++ // the content itself is not needed
+					// The content is not needed, but a part that cannot be
+					// decoded is not counted, as it is not matched.
+					if _, err := message.New(h, bytes.NewReader(b)); err != nil && !message.IsUnknownCharset(err) {
+						return false, nil
+					}
+					count++
 				} else {
 					// The part is matched as it decodes (transfer encoding and
 					// charset, then HTML to text for :text), never held whole.

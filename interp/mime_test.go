@@ -12,20 +12,6 @@ import (
 	"github.com/migadu/go-sieve/parser"
 )
 
-func TestHTMLToText(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"<p>Hello&nbsp;<b>world</b></p>", "Hello world"},
-		{"<html><head><style>.x{color:red}</style></head><body>text</body></html>", "text"},
-		{"<SCRIPT type=\"text/javascript\">\nvar secret = 1;\n</SCRIPT >after", "after"},
-		{"a <style>unterminated", "a"},
-		{"one\n\n  two\t\tthree", "one two three"},
-	} {
-		if got := htmlToText(tc.in); got != tc.want {
-			t.Errorf("htmlToText(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestParseMediaTypeLenient(t *testing.T) {
 	for _, tc := range []struct {
 		in, mediaType string

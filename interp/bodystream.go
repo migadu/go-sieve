@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -16,6 +17,10 @@ const bodyReadChunk = 32 * 1024
 // is checked between chunks rather than only between parts. :matches and
 // :regex need their whole input and already truncate it at the matcher's
 // input bound, so only that much is read for them.
+//
+// A part whose decoding fails part-way is matched on what decoded before the
+// failure; the rest cannot be examined. For :matches and :regex such a part
+// is skipped, as the whole-part form always did.
 func (t *TestBody) matchStream(ctx context.Context, d *RuntimeData, r io.Reader) (bool, error) {
 	switch {
 	case t.match == MatchContains && t.comparatorFolds():
@@ -41,36 +46,42 @@ func (t *TestBody) comparatorFolds() bool {
 	return false
 }
 
-// fold applies the comparator's case folding, exactly as testString does.
-func (t *TestBody) fold(s string) string {
+// appendFolded appends chunk to dst with the comparator's case folding, the
+// same folding testString applies to :contains (toLowerASCII, or
+// strings.ToLower, whose []byte form bytes.ToLower is). TestStreamMatchesTestString
+// holds the two to the same answers.
+func (t *TestBody) appendFolded(dst, chunk []byte) []byte {
 	switch t.comparator {
 	case ComparatorASCIICaseMap:
-		return toLowerASCII(s)
+		for _, c := range chunk {
+			dst = append(dst, foldASCII(c))
+		}
+		return dst
 	case ComparatorUnicodeCaseMap:
-		return strings.ToLower(s)
+		return append(dst, bytes.ToLower(chunk)...)
 	}
-	return s
+	return append(dst, chunk...)
 }
 
 // streamContains is testString's :contains over a stream: the folded content
 // is searched chunk by chunk for any folded key, carrying len(key)-1 bytes
 // between chunks so a key split across two is still found.
 func (t *TestBody) streamContains(ctx context.Context, d *RuntimeData, r io.Reader) (bool, error) {
-	keys := make([]string, 0, len(t.key))
+	keys := make([][]byte, 0, len(t.key))
 	carry := 0
 	for _, k := range t.key {
-		k = t.fold(expandVars(d, k))
-		if k == "" {
+		folded := t.appendFolded(nil, []byte(expandVars(d, k)))
+		if len(folded) == 0 {
 			return true, nil // every string contains ""
 		}
-		keys = append(keys, k)
-		if len(k)-1 > carry {
-			carry = len(k) - 1
+		keys = append(keys, folded)
+		if len(folded)-1 > carry {
+			carry = len(folded) - 1
 		}
 	}
 
-	var window string
-	var raw []byte // undecoded tail: an incomplete rune at a chunk's end
+	var window []byte
+	var raw []byte // undecoded tail: a rune cut by the chunk's end
 	buf := make([]byte, bodyReadChunk)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -78,34 +89,34 @@ func (t *TestBody) streamContains(ctx context.Context, d *RuntimeData, r io.Read
 		}
 		n, err := r.Read(buf)
 		raw = append(raw, buf[:n]...)
-		eof := err == io.EOF
-		if err != nil && !eof {
-			return false, nil // RFC 5173: a part that cannot be decoded is skipped
-		}
+		// At the end, or at a decoding error, everything decoded so far is
+		// searched; after an error nothing more can be.
+		done := err != nil
 
 		// Fold only whole runes; a rune cut by the chunk waits for its rest.
 		cut := len(raw)
-		if !eof {
+		if !done {
 			cut = lastRuneBoundary(raw)
 		}
-		window += t.fold(string(raw[:cut]))
+		window = t.appendFolded(window, raw[:cut])
 		raw = append(raw[:0], raw[cut:]...)
 
 		for _, k := range keys {
-			if strings.Contains(window, k) {
+			if bytes.Contains(window, k) {
 				return true, nil
 			}
 		}
-		if eof {
+		if done {
 			return false, nil
 		}
 		if len(window) > carry {
 			// Keep the tail a key could start in, on a rune boundary.
 			start := len(window) - carry
-			for start > 0 && !utf8.RuneStart(window[start]) {
+			for start > 0 && start < len(window) && !utf8.RuneStart(window[start]) {
 				start--
 			}
-			window = window[start:]
+			kept := copy(window, window[start:])
+			window = window[:kept]
 		}
 	}
 }
@@ -140,7 +151,7 @@ func (t *TestBody) streamIs(ctx context.Context, d *RuntimeData, r io.Reader) (b
 			if strings.EqualFold(value, k) {
 				return true, nil
 			}
-		} else if t.fold(value) == t.fold(k) {
+		} else if string(t.appendFolded(nil, []byte(value))) == string(t.appendFolded(nil, []byte(k))) {
 			return true, nil
 		}
 	}
