@@ -3,38 +3,12 @@ package interp
 import (
 	"bytes"
 	"context"
-	"html"
 	"io"
 	"mime"
-	"regexp"
 	"strings"
 
 	"github.com/emersion/go-message"
 )
-
-var (
-	htmlTagRe   = regexp.MustCompile(`(?s)<[^>]*>`)
-	htmlSpaceRe = regexp.MustCompile(`[\s\p{Zs}]+`)
-	// Script and style elements carry nothing a reader sees, so their content
-	// goes with their tags; Pigeonhole's converter drops them too.
-	// An unterminated element runs to the end, as browsers treat it.
-	htmlScriptRe = regexp.MustCompile(`(?is)<script\b[^>]*>.*?(</script\s*>|\z)`)
-	htmlStyleRe  = regexp.MustCompile(`(?is)<style\b[^>]*>.*?(</style\s*>|\z)`)
-)
-
-// htmlToText reduces HTML to the text a reader sees: script and style
-// elements are removed with their content, tags become spaces, character
-// references are decoded, and runs of whitespace collapse to one space.
-func htmlToText(s string) string {
-	s = htmlScriptRe.ReplaceAllString(s, " ")
-	s = htmlStyleRe.ReplaceAllString(s, " ")
-	s = htmlTagRe.ReplaceAllString(s, " ")
-	// Decode references before collapsing whitespace so that &nbsp; (U+00A0)
-	// is normalized to a plain space too.
-	s = html.UnescapeString(s)
-	s = htmlSpaceRe.ReplaceAllString(s, " ")
-	return strings.TrimSpace(s)
-}
 
 type TestBody struct {
 	matcherTest
@@ -236,27 +210,22 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			}
 		} else {
 			if process {
-				// Text part
-				// For text parts, we should decode transfer encoding if any
-				// An unknown charset is not fatal: the part is still
-				// readable and matching raw octets beats skipping it.
-				entity, err := message.New(h, bytes.NewReader(b))
-				if err != nil && !message.IsUnknownCharset(err) {
-					return false, nil // RFC 5173: skip if text cannot be decoded
-				}
-				decodedBody, err := io.ReadAll(entity.Body)
-				if err != nil {
-					return false, nil
-				}
-
-				if t.text && (mediaType == "text/html" || mediaType == "application/xhtml+xml") {
-					decodedBody = []byte(htmlToText(string(decodedBody)))
-				}
-
 				if t.isCount() {
-					count++
+					count++ // the content itself is not needed
 				} else {
-					match, err := t.tryMatch(ctx, d, string(decodedBody))
+					// The part is matched as it decodes (transfer encoding and
+					// charset, then HTML to text for :text), never held whole.
+					// An unknown charset is not fatal: the part is still
+					// readable and matching raw octets beats skipping it.
+					entity, err := message.New(h, bytes.NewReader(b))
+					if err != nil && !message.IsUnknownCharset(err) {
+						return false, nil // RFC 5173: skip if text cannot be decoded
+					}
+					var content io.Reader = entity.Body
+					if t.text && (mediaType == "text/html" || mediaType == "application/xhtml+xml") {
+						content = newHTMLTextReader(content)
+					}
+					match, err := t.matchStream(ctx, d, content)
 					if err != nil {
 						return false, err
 					}

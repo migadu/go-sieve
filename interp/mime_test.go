@@ -6,6 +6,7 @@ import (
 	"net/textproto"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/migadu/go-sieve/lexer"
 	"github.com/migadu/go-sieve/parser"
@@ -61,8 +62,12 @@ func loadWith(t *testing.T, script string) *Script {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := LoadScript(cmds, &Options{MaxVariableCount: 128, MaxVariableNameLen: 32, MaxVariableLen: 4000},
-		[]string{"mime", "foreverypart", "extracttext", "variables", "body", "fileinto", "relational"})
+	// The regex soft wait is raised as sora raises it: a bounded 256 KB match
+	// can exceed the 100ms default under -race.
+	s, err := LoadScript(cmds, &Options{MaxVariableCount: 128, MaxVariableNameLen: 32, MaxVariableLen: 4000,
+		RegexLimits: RegexLimits{MaxExecTime: 10 * time.Second}},
+		[]string{"mime", "foreverypart", "extracttext", "variables", "body", "fileinto", "relational",
+			"comparator-i;octet", "comparator-i;ascii-casemap", "comparator-i;unicode-casemap"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -93,16 +93,16 @@ func (p *mimePart) decodeText(d *RuntimeData, limit int64) string {
 	if err != nil {
 		return ""
 	}
-	decoded, err := io.ReadAll(io.LimitReader(entity.Body, limit))
+	var content io.Reader = io.LimitReader(entity.Body, limit)
+	mediaType, _ := parseMediaTypeLenient(contentType)
+	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+		content = newHTMLTextReader(content)
+	}
+	decoded, err := io.ReadAll(content)
 	if err != nil {
 		return ""
 	}
-	text := strings.ToValidUTF8(string(decoded), "\uFFFD")
-	mediaType, _ := parseMediaTypeLenient(contentType)
-	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
-		return htmlToText(text)
-	}
-	return text
+	return strings.ToValidUTF8(string(decoded), "\uFFFD")
 }
 
 // mimeTree parses the message's MIME structure once per message. The tree is
