@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 // htmlToText reduces s to its text through htmlTextReader; tests only.
@@ -40,7 +41,12 @@ var htmlCases = []struct{ in, want string }{
 	// A script element ends only at a real closing tag.
 	{"a<script>var x=1;</scripts>still script</script>b", "a b"},
 	{"a<script_x>not script</script_x>b", "a not script b"},
-	{"a<script-x>is script</script-x>b", "a"}, // "</script-x>" is not a closing tag, so the element never ends
+	{"a<script-x>not script</script-x>b", "a not script b"},
+	{"<p>Invoice</p><script-loader src=x></script-loader><p>Pay now</p>", "Invoice Pay now"},
+	{"<script>a</script><script >b</script >c", "c"},
+	{"<!-->Reset your password</body>", "Reset your password"},
+	{"<!--->after", "after"},
+	{"<!-- x --!>after", "after"},
 	{"<script>x</script/>y", "y"},
 	{"x <!-- a > b visible", "x"}, // an unterminated comment runs to the end
 	// Whitespace: \s and Zs runs collapse in the middle; any white space is
@@ -203,14 +209,16 @@ func TestStreamReadsOnlyWhatItNeeds(t *testing.T) {
 	}
 }
 
-// failingReader serves src and then fails, like a part whose encoding is
-// corrupt part-way.
-type failingReader struct {
-	src io.Reader
+// failingReader serves src with the last bytes arriving together with a
+// non-EOF error, like a decoder that fails on its final block.
+func failingReader(s string) io.Reader {
+	return &errAfter{r: iotest.DataErrReader(strings.NewReader(s))}
 }
 
-func (f failingReader) Read(p []byte) (int, error) {
-	n, err := f.src.Read(p)
+type errAfter struct{ r io.Reader }
+
+func (e *errAfter) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
 	if err == io.EOF {
 		return n, io.ErrUnexpectedEOF
 	}
@@ -218,17 +226,39 @@ func (f failingReader) Read(p []byte) (int, error) {
 }
 
 // TestStreamDecodeErrorMatchesWhatDecoded: content decoded before a failure
-// is still matched, and bytes handed over together with the error are not
-// dropped.
+// is still matched, including the bytes handed over together with the error,
+// on the plain path and through the HTML filter.
 func TestStreamDecodeErrorMatchesWhatDecoded(t *testing.T) {
 	s := loadWith(t, `require ["body"]; keep;`)
 	d := NewRuntimeData(s, DummyPolicy{}, EnvelopeStatic{}, MessageStatic{})
 	test := &TestBody{matcherTest: newMatcherTest()}
 	test.match, test.key = MatchContains, []string{"NEEDLE"}
-	for _, body := range []string{"before NEEDLE " + strings.Repeat("x", 2*bodyReadChunk), strings.Repeat("x", 2*bodyReadChunk) + "NEEDLE"} {
-		ok, err := test.matchStream(context.Background(), d, failingReader{strings.NewReader(body)})
+	for _, body := range []string{"before NEEDLE", strings.Repeat("x", 2*bodyReadChunk) + "NEEDLE"} {
+		ok, err := test.matchStream(context.Background(), d, failingReader(body))
 		if err != nil || !ok {
-			t.Fatalf("needle decoded before the failure was not matched (ok=%v err=%v)", ok, err)
+			t.Fatalf("plain: needle decoded before the failure was not matched (ok=%v err=%v)", ok, err)
 		}
+		ok, err = test.matchStream(context.Background(), d, newHTMLTextReader(failingReader("<p>"+body+"</p>")))
+		if err != nil || !ok {
+			t.Fatalf("html: needle decoded before the failure was not matched (ok=%v err=%v)", ok, err)
+		}
+	}
+}
+
+// TestStreamContainsOnContinuationBytes: a part of UTF-8 continuation bytes (a
+// binary attachment reached via :content) must not grow the search window.
+func TestStreamContainsOnContinuationBytes(t *testing.T) {
+	s := loadWith(t, `require ["body"]; keep;`)
+	d := NewRuntimeData(s, DummyPolicy{}, EnvelopeStatic{}, MessageStatic{})
+	test := &TestBody{matcherTest: newMatcherTest()}
+	test.match, test.key = MatchContains, []string{"@@"}
+	body := strings.Repeat("\x80", 4<<20)
+	start := time.Now()
+	ok, err := test.matchStream(context.Background(), d, strings.NewReader(body))
+	if err != nil || ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("4 MB of continuation bytes took %v: the window is growing", elapsed)
 	}
 }

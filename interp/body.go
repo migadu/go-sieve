@@ -127,23 +127,20 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			prologue, nested, epilogue := splitMultipart(b, boundary)
 
 			if process {
-				// Search prologue and epilogue
+				// Search prologue and epilogue. A body whose boundary never
+				// appears is one big prologue; it streams rather than being
+				// copied into a string.
 				if t.isCount() {
 					count += 2
 				} else {
-					match, err := t.tryMatch(ctx, d, string(prologue))
-					if err != nil {
-						return false, err
-					}
-					if match {
-						return true, nil
-					}
-					match, err = t.tryMatch(ctx, d, string(epilogue))
-					if err != nil {
-						return false, err
-					}
-					if match {
-						return true, nil
+					for _, part := range [][]byte{prologue, epilogue} {
+						match, err := t.matchStream(ctx, d, bytes.NewReader(part))
+						if err != nil {
+							return false, err
+						}
+						if match {
+							return true, nil
+						}
 					}
 				}
 			}

@@ -17,8 +17,9 @@ import (
 // and by extracttext.
 //
 // What counts as a tag follows the HTML tokenizer: "<" opens one only when an
-// ASCII letter, "/", "!" or "?" follows, so "5 < 10" is text; a tag with no
-// ">" runs to the end of the input, as does a comment with no "-->".
+// ASCII letter, "/", "!" or "?" follows, so "5 < 10" is text; a tag name ends
+// at whitespace, "/" or ">"; a tag with no ">" runs to the end of the input,
+// as does a comment with no "-->".
 //
 // Whitespace is handled as the regular-expression form of this filter did:
 // runs of ASCII whitespace and Unicode space separators (so U+00A0 from
@@ -30,7 +31,12 @@ type htmlTextReader struct {
 	in    []byte // unprocessed input
 	out   []byte // processed text not yet returned
 	eof   bool
+	err   error // the source's error, returned once the text before it is out
 	state htmlState
+
+	// commentOpened: "<!--" was just consumed and its abrupt-close forms are
+	// still to be checked.
+	commentOpened bool
 
 	// skipEnd is the closing tag that ends a script or style element.
 	skipEnd []byte
@@ -74,6 +80,9 @@ func (r *htmlTextReader) Read(p []byte) (int, error) {
 		if r.eof {
 			r.finish()
 			if len(r.out) == 0 {
+				if r.err != nil {
+					return 0, r.err
+				}
 				return 0, io.EOF
 			}
 			break
@@ -83,10 +92,13 @@ func (r *htmlTextReader) Read(p []byte) (int, error) {
 		}
 		n, err := r.src.Read(r.buf)
 		r.in = append(r.in, r.buf[:n]...)
-		if err == io.EOF {
+		if err != nil {
+			// Whatever arrived with the error, and whatever was waiting for
+			// more input, is text up to here; a non-EOF error follows it.
 			r.eof = true
-		} else if err != nil {
-			return 0, err
+			if err != io.EOF {
+				r.err = err
+			}
 		}
 		r.process()
 	}
@@ -144,11 +156,16 @@ func (r *htmlTextReader) process() {
 				if bytes.HasPrefix(r.in, []byte("!--")) {
 					r.in = r.in[3:]
 					r.state = htmlComment
+					r.commentOpened = true
 					continue
 				}
 			}
-			if isTagNameByte(c) && len(r.tag) < htmlTagNameMax {
-				r.tag = append(r.tag, c)
+			if !endsTagName(c) {
+				if len(r.tag) < htmlTagNameMax {
+					r.tag = append(r.tag, c)
+				} else {
+					r.tag = append(r.tag[:htmlTagNameMax], '.') // too long to be script or style
+				}
 				r.in = r.in[1:]
 				continue
 			}
@@ -173,12 +190,29 @@ func (r *htmlTextReader) process() {
 				r.state = htmlText
 			}
 		case htmlComment:
-			idx := bytes.Index(r.in, []byte("-->"))
+			if r.commentOpened {
+				// "<!-->" and "<!--->" are closed at once (HTML tokenizer).
+				if len(r.in) < 2 && !r.eof {
+					return
+				}
+				r.commentOpened = false
+				if bytes.HasPrefix(r.in, []byte(">")) || bytes.HasPrefix(r.in, []byte("->")) {
+					r.in = r.in[bytes.IndexByte(r.in, '>')+1:]
+					r.space()
+					r.state = htmlText
+					continue
+				}
+			}
+			// "-->" closes a comment, as does the "--!>" the tokenizer accepts.
+			idx, n := bytes.Index(r.in, []byte("-->")), 3
+			if j := bytes.Index(r.in, []byte("--!>")); j >= 0 && (idx < 0 || j < idx) {
+				idx, n = j, 4
+			}
 			if idx < 0 {
-				r.keepTail(2)
+				r.keepTail(3)
 				return
 			}
-			r.in = r.in[idx+3:]
+			r.in = r.in[idx+n:]
 			r.space()
 			r.state = htmlText
 		case htmlSkip:
@@ -280,7 +314,7 @@ func (r *htmlTextReader) visible(ch rune) {
 	case unicode.IsSpace(ch):
 		// Other white space is kept in the middle of the text but trimmed
 		// from the ends, so it waits for the next visible character.
-		if r.emitted {
+		if r.emitted && len(r.pending) < htmlPendingMax {
 			r.pending = utf8.AppendRune(r.pending, ch)
 		}
 	default:
@@ -304,10 +338,16 @@ func (r *htmlTextReader) flushPending() {
 	}
 }
 
+// htmlPendingMax bounds the whitespace held between two visible characters.
+// Past it, further white space is folded into what is held; only a run of
+// other white space interleaved with collapsible space can grow it, and no
+// text a reader sees changes.
+const htmlPendingMax = 64
+
 // space records collapsible whitespace (a tag counts as one): at most one
 // space in a row, none before the first visible character.
 func (r *htmlTextReader) space() {
-	if r.emitted && (len(r.pending) == 0 || r.pending[len(r.pending)-1] != ' ') {
+	if r.emitted && (len(r.pending) == 0 || r.pending[len(r.pending)-1] != ' ') && len(r.pending) < htmlPendingMax {
 		r.pending = append(r.pending, ' ')
 	}
 }
@@ -331,10 +371,11 @@ func opensTag(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '/' || c == '!' || c == '?'
 }
 
-// isTagNameByte is a word character, so "<script_x>" is not a script element
-// while "<script-x>" is, exactly as the \b of the previous form decided.
-func isTagNameByte(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+// endsTagName reports whether c ends a tag name, as the HTML tokenizer has
+// it: whitespace, "/" or ">". So "<script-x>" and "<script_x>" are elements of
+// their own, not script elements.
+func endsTagName(c byte) bool {
+	return c == '>' || c == '/' || isSpaceByte(c)
 }
 
 func isEntityByte(c byte) bool {

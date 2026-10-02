@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -48,8 +49,8 @@ func (t *TestBody) comparatorFolds() bool {
 
 // appendFolded appends chunk to dst with the comparator's case folding, the
 // same folding testString applies to :contains (toLowerASCII, or
-// strings.ToLower, whose []byte form bytes.ToLower is). TestStreamMatchesTestString
-// holds the two to the same answers.
+// strings.ToLower: unicode.ToLower per rune, an invalid byte becoming
+// U+FFFD). TestStreamMatchesTestString holds the two to the same answers.
 func (t *TestBody) appendFolded(dst, chunk []byte) []byte {
 	switch t.comparator {
 	case ComparatorASCIICaseMap:
@@ -58,7 +59,16 @@ func (t *TestBody) appendFolded(dst, chunk []byte) []byte {
 		}
 		return dst
 	case ComparatorUnicodeCaseMap:
-		return append(dst, bytes.ToLower(chunk)...)
+		for len(chunk) > 0 {
+			r, size := utf8.DecodeRune(chunk)
+			chunk = chunk[size:]
+			if r < utf8.RuneSelf {
+				dst = append(dst, foldASCII(byte(r)))
+				continue
+			}
+			dst = utf8.AppendRune(dst, unicode.ToLower(r))
+		}
+		return dst
 	}
 	return append(dst, chunk...)
 }
@@ -110,12 +120,11 @@ func (t *TestBody) streamContains(ctx context.Context, d *RuntimeData, r io.Read
 			return false, nil
 		}
 		if len(window) > carry {
-			// Keep the tail a key could start in, on a rune boundary.
-			start := len(window) - carry
-			for start > 0 && start < len(window) && !utf8.RuneStart(window[start]) {
-				start--
-			}
-			kept := copy(window, window[start:])
+			// Keep the tail a key could start in. The window is folded bytes
+			// searched as bytes, so the tail need not start on a rune boundary;
+			// walking back to one would keep a whole part of continuation
+			// bytes.
+			kept := copy(window, window[len(window)-carry:])
 			window = window[:kept]
 		}
 	}
