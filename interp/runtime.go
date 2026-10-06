@@ -69,6 +69,12 @@ type RuntimeData struct {
 	// Vacation extension state
 	VacationResponses map[string]VacationResponse
 
+	// Reject extension state (RFC 5429): set by reject or ereject (then
+	// RejectExtended), with the reason after variable expansion.
+	Rejected       bool
+	RejectReason   string
+	RejectExtended bool
+
 	// MIME part tree (RFC 5703), parsed on first use, and the parts the
 	// running foreverypart loops have reached, innermost last.
 	mimeRoot  *mimePart
@@ -95,6 +101,9 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		Flags:           make([]string, len(d.Flags)),
 		Keep:            d.Keep,
 		ImplicitKeep:    d.ImplicitKeep,
+		Rejected:        d.Rejected,
+		RejectReason:    d.RejectReason,
+		RejectExtended:  d.RejectExtended,
 		FlagAliases:     make(map[string]string, len(d.FlagAliases)),
 		MatchVariables:  make([]string, len(d.MatchVariables)),
 		Variables:       make(map[string]string, len(d.Variables)),

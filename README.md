@@ -24,6 +24,9 @@ implementation in Go.
 - mailbox ([RFC 5490])
 - subaddress ([RFC 5233])
 - body ([RFC 5173])
+- reject, ereject ([RFC 5429]): the action is recorded in `RuntimeData`
+  (`Rejected`, `RejectReason`, `RejectExtended`); refusing the message is up
+  to the caller
 
 ## Supported comparators
 
@@ -47,3 +50,4 @@ See ./cmd/sieve-run.
 [RFC 5490]: https://datatracker.ietf.org/doc/html/rfc5490
 [RFC 5233]: https://datatracker.ietf.org/doc/html/rfc5233
 [RFC 5173]: https://datatracker.ietf.org/doc/html/rfc5173
+[RFC 5429]: https://datatracker.ietf.org/doc/html/rfc5429
