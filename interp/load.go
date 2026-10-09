@@ -35,6 +35,9 @@ var supportedRequires = map[string]struct{}{
 	"mime":         {},
 	"foreverypart": {},
 	"extracttext":  {},
+	// RFC5429 - Reject and Extended Reject
+	"reject":  {},
+	"ereject": {},
 }
 
 var (
@@ -71,6 +74,9 @@ func init() {
 		"foreverypart": loadForEveryPart,
 		"break":        loadBreak,
 		"extracttext":  loadExtractText,
+		// RFC 5429 (reject, ereject extensions)
+		"reject":  loadReject,
+		"ereject": loadEreject,
 		// vnd.dovecot.testsuite
 		"test":             loadDovecotTest,
 		"test_set":         loadDovecotTestSet,

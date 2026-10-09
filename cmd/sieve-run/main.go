@@ -51,7 +51,7 @@ func main() {
 		"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 		"imap4flags", "variables", "relational", "vacation", "copy", "regex",
 		"date", "index", "editheader", "mailbox", "subaddress",
-		"mime", "foreverypart", "extracttext",
+		"mime", "foreverypart", "extracttext", "reject", "ereject",
 	}
 	loadedScript, err := sieve.Load(script, opts)
 	end := time.Now()
@@ -83,6 +83,13 @@ func main() {
 	fmt.Println("fileinfo:", data.Mailboxes)
 	fmt.Println("keep:", data.ImplicitKeep || data.Keep)
 	fmt.Printf("flags: %s\n", strings.Join(data.Flags, " "))
+	if data.Rejected {
+		action := "reject"
+		if data.RejectExtended {
+			action = "ereject"
+		}
+		fmt.Printf("%s: %q\n", action, data.RejectReason)
+	}
 
 	// Print vacation responses
 	if len(data.VacationResponses) > 0 {

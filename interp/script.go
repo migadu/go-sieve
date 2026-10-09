@@ -99,10 +99,10 @@ func (s Script) Execute(ctx context.Context, d *RuntimeData) error {
 	for _, c := range s.cmd {
 		if err := c.Execute(ctx, d); err != nil {
 			if errors.Is(err, ErrStop) {
-				return nil
+				break
 			}
 			return err
 		}
 	}
-	return nil
+	return checkRejectConflicts(d)
 }
