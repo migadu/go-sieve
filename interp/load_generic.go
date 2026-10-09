@@ -62,8 +62,10 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 							return lexer.ErrorAt(position, "LoadSpec: malformed encoded character sequence: %v", err)
 						}
 					}
-					if s.RequiresExtension("variables") && !lastTag.NoVariables {
-
+					if !lastTag.NoVariables {
+						if err := checkUsableVars(s, a, []string{value}); err != nil {
+							return err
+						}
 					}
 
 					lastTag.MatchStr([]string{value})
@@ -92,6 +94,12 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 					}
 				}
 
+				if !pos.NoVariables {
+					if err := checkUsableVars(s, a, []string{value}); err != nil {
+						return err
+					}
+				}
+
 				pos.MatchStr([]string{value})
 			} else {
 				panic("no pos matcher")
@@ -114,6 +122,12 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 							if err != nil {
 								return lexer.ErrorAt(position, "LoadSpec: malformed encoded character sequence: %v", err)
 							}
+						}
+					}
+
+					if !lastTag.NoVariables {
+						if err := checkUsableVars(s, a, value); err != nil {
+							return err
 						}
 					}
 
@@ -143,6 +157,12 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 						if err != nil {
 							return lexer.ErrorAt(position, "LoadSpec: malformed encoded character sequence: %v", err)
 						}
+					}
+				}
+
+				if !pos.NoVariables {
+					if err := checkUsableVars(s, a, value); err != nil {
+						return err
 					}
 				}
 
