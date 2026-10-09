@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/migadu/go-sieve/lexer"
 )
 
 /*
@@ -28,6 +30,38 @@ func usedVars(script *Script, s string) []string {
 	}
 
 	return variables
+}
+
+// checkUsableVars refuses, at load time, a string whose variable references the
+// script cannot read: a namespace whose extension is not required, an unknown
+// namespace, or an invalid name. RFC 5229 §3: "References to namespaces without
+// a prior require statement for the relevant extension MUST cause an error."
+// expandVars would otherwise panic on it at execution time. Match variables
+// (${1}) and user variables are always readable.
+func checkUsableVars(script *Script, at interface{ LineCol() (int, int) }, values []string) error {
+	if !script.RequiresExtension("variables") {
+		return nil
+	}
+	for _, value := range values {
+		for _, name := range usedVars(script, value) {
+			if n, err := strconv.Atoi(name); err == nil && n >= 0 {
+				continue
+			}
+			if _, gettable := script.IsVarUsable(name); gettable {
+				continue
+			}
+			namespace, _, ok := strings.Cut(name, ".")
+			switch {
+			case ok && namespace == "envelope":
+				return lexer.ErrorAt(at, "variable ${%s} needs require \"envelope\"", name)
+			case ok:
+				return lexer.ErrorAt(at, "variable ${%s} is in the unknown namespace %q", name, namespace)
+			default:
+				return lexer.ErrorAt(at, "variable ${%s} is not a usable variable", name)
+			}
+		}
+	}
+	return nil
 }
 
 func usedVarsAreValid(script *Script, s string) bool {
