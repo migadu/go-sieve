@@ -19,16 +19,6 @@ func stripRFC2822Comments(addr string) string {
 	return strings.TrimSpace(commentRegex.ReplaceAllString(addr, ""))
 }
 
-// isASCII reports whether s has no byte above 0x7F.
-func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= 0x80 {
-			return false
-		}
-	}
-	return true
-}
-
 type Test interface {
 	Check(ctx context.Context, d *RuntimeData) (bool, error)
 }
@@ -156,32 +146,8 @@ func (a AddressTest) matchValues(ctx context.Context, d *RuntimeData, values []s
 		cleanValue := stripRFC2822Comments(value)
 
 		// A bare angle-addr ("<user@example.com>") is a valid mailbox (RFC 5322
-		// §3.4: name-addr = [display-name] angle-addr) and is parsed below.
-		// Only one with non-ASCII bytes is still matched literally: Pigeonhole
-		// rejects a non-ASCII local part (smtp_address_init_from_msg), and its
-		// test-address.svtest has :all match Resent-Cc:<jürgen@example.com>
-		// as-is. Other forms of a non-ASCII address parse as they always did.
-		trimmed := strings.TrimSpace(cleanValue)
-		hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") &&
-			strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
-
-		if hasBareAngleBrackets && !isASCII(trimmed) {
-			if a.isCount() {
-				// For count mode, invalid addresses don't count
-				continue
-			}
-
-			// Try literal matching against the invalid address format
-			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
-			if err != nil {
-				return false, err
-			}
-			if ok {
-				return true, nil
-			}
-			continue
-		}
-
+		// §3.4: name-addr = [display-name] angle-addr), and a non-ASCII local
+		// part is accepted in it as in every other form (RFC 6532).
 		addrList, err := mail.ParseAddressList(cleanValue)
 		if err != nil {
 			// If parsing fails, try matching against the literal header value
