@@ -145,30 +145,9 @@ func (a AddressTest) matchValues(ctx context.Context, d *RuntimeData, values []s
 		// Strip RFC 2822 comments before parsing
 		cleanValue := stripRFC2822Comments(value)
 
-		// Check for invalid angle bracket usage (bare angle brackets without display name)
-		// Pattern like "<email@domain.com>" without preceding display name is invalid
-		trimmed := strings.TrimSpace(cleanValue)
-		hasBareAngleBrackets := strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") &&
-			strings.Count(trimmed, "<") == 1 && strings.Count(trimmed, ">") == 1
-
-		if hasBareAngleBrackets {
-			// Bare angle brackets are invalid for address parsing, but for :all we can match literally
-			if a.isCount() {
-				// For count mode, invalid addresses don't count
-				continue
-			}
-
-			// Try literal matching against the invalid address format
-			ok, err := testAddress(ctx, d, a.matcherTest, a.AddressPart, cleanValue)
-			if err != nil {
-				return false, err
-			}
-			if ok {
-				return true, nil
-			}
-			continue
-		}
-
+		// A bare angle-addr ("<user@example.com>") is a valid mailbox (RFC 5322
+		// §3.4: name-addr = [display-name] angle-addr), and a non-ASCII local
+		// part is accepted in it as in every other form (RFC 6532).
 		addrList, err := mail.ParseAddressList(cleanValue)
 		if err != nil {
 			// If parsing fails, try matching against the literal header value
