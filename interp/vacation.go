@@ -2,7 +2,6 @@ package interp
 
 import (
 	"context"
-	"fmt"
 )
 
 // VacationResponse represents an autoresponse to be sent.
@@ -69,11 +68,13 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 
 	addresses := expandVarsList(d, c.Addresses)
 
-	// Get the sender's address from the message
-	// We'll use the envelope from address as the sender
+	// The response goes to the envelope sender. A null reverse path (a bounce,
+	// DSN or MDN) gets none: "Responders MUST NOT generate any response for which
+	// the destination of that response would be a null address" (RFC 3834 §2).
+	// That is no error, and the rest of the script still runs.
 	sender := d.Envelope.EnvelopeFrom()
 	if sender == "" {
-		return fmt.Errorf("vacation: failed to get sender from envelope")
+		return nil
 	}
 
 	// Check if the sender is in the list of "my" addresses
