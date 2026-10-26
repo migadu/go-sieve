@@ -45,7 +45,7 @@ func checkRejectConflicts(d *RuntimeData) error {
 		conflict = "fileinto"
 	case len(d.RedirectAddr) > 0:
 		conflict = "redirect"
-	case len(d.VacationResponses) > 0:
+	case d.vacationExecuted:
 		conflict = "vacation"
 	default:
 		return nil

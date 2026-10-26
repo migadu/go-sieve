@@ -68,6 +68,9 @@ type RuntimeData struct {
 
 	// Vacation extension state
 	VacationResponses map[string]VacationResponse
+	// vacationExecuted records that a vacation action ran, whether or not it
+	// queued a response, for the RFC 5429 §2.4 reject conflict.
+	vacationExecuted bool
 
 	// Reject extension state (RFC 5429): set by reject or ereject (then
 	// RejectExtended), with the reason after variable expansion.
@@ -115,6 +118,8 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		testScript:      d.testScript,
 		testMaxNesting:  d.testMaxNesting,
 	}
+
+	newData.vacationExecuted = d.vacationExecuted
 
 	// Copy vacation responses if they exist
 	if d.VacationResponses != nil {

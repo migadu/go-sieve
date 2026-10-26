@@ -17,6 +17,13 @@ var rejectExtensions = []string{
 
 func runReject(t *testing.T, script string) (*interp.RuntimeData, error) {
 	t.Helper()
+	return runRejectFrom(t, script, "sender@example.org")
+}
+
+// runRejectFrom runs script for a message whose envelope sender is from; "" is
+// the null reverse path.
+func runRejectFrom(t *testing.T, script, from string) (*interp.RuntimeData, error) {
+	t.Helper()
 	opts := sieve.DefaultOptions()
 	opts.EnabledExtensions = rejectExtensions
 	loaded, err := sieve.Load(strings.NewReader(script), opts)
@@ -27,7 +34,7 @@ func runReject(t *testing.T, script string) (*interp.RuntimeData, error) {
 	hdr.Set("To", "list@frop.example")
 	hdr.Set("Subject", "Buy now")
 	data := sieve.NewRuntimeData(loaded, interp.DummyPolicy{},
-		interp.EnvelopeStatic{From: "sender@example.org", To: "rcpt@example.net"},
+		interp.EnvelopeStatic{From: from, To: "rcpt@example.net"},
 		interp.MessageStatic{Header: hdr, Size: 100})
 	return data, loaded.Execute(context.Background(), data)
 }
@@ -123,6 +130,35 @@ keep;`,
 			}
 			if strings.Join(d.Flags, " ") != strings.Join(tc.wantFlags, " ") {
 				t.Fatalf("flags = %v, want %v", d.Flags, tc.wantFlags)
+			}
+		})
+	}
+}
+
+// A vacation that sends nothing, to a null sender or to one of its :addresses, has
+// still executed, so it conflicts with reject as any other does (RFC 5429 §2.4).
+func TestRejectConflictsWithVacationThatSendsNothing(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+		from   string
+	}{
+		{"null sender, vacation then reject", `require ["reject", "vacation"]; vacation "away"; reject "no";`, ""},
+		{"null sender, reject then vacation", `require ["reject", "vacation"]; reject "no"; vacation "away";`, ""},
+		{"own address, vacation then reject", `require ["reject", "vacation"]; vacation :addresses "sender@example.org" "away"; reject "no";`, "sender@example.org"},
+		{"own address, reject then vacation", `require ["reject", "vacation"]; reject "no"; vacation :addresses "sender@example.org" "away";`, "sender@example.org"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := runRejectFrom(t, tc.script, tc.from)
+			if err == nil {
+				t.Fatal("execute succeeded, want a conflict error")
+			}
+			if !strings.Contains(err.Error(), "vacation") {
+				t.Fatalf("error %q, want it to contain %q", err, "vacation")
+			}
+			if len(data.VacationResponses) != 0 {
+				t.Errorf("expected no vacation responses, got %d", len(data.VacationResponses))
 			}
 		})
 	}

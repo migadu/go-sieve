@@ -56,6 +56,10 @@ type CmdVacation struct {
 
 // Execute implements the vacation command as defined in RFC 5230.
 func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
+	// The action has executed even when it sends nothing below, and conflicts
+	// with reject all the same (RFC 5429 §2.4).
+	d.vacationExecuted = true
+
 	// Expand variables in all string fields
 	subject := expandVars(d, c.Subject)
 	if subject == "" {
