@@ -2,6 +2,9 @@ package interp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 )
 
 // VacationResponse represents an autoresponse to be sent.
@@ -20,6 +23,12 @@ type VacationResponse struct {
 
 	// Handle is a handle that uniquely identifies this vacation action.
 	Handle string
+
+	// ResponseIdentity is an opaque, stable key for RFC 5230 section 4.2
+	// suppression tracking. It uses the explicit handle, or the subject, from,
+	// mime and reason arguments when no handle was supplied. Arguments are
+	// identified before variable expansion; rendered fields above remain expanded.
+	ResponseIdentity string
 
 	// Days specifies the minimum number of days between autoresponses to the same sender.
 	Days int
@@ -49,6 +58,9 @@ type CmdVacation struct {
 	// Handle specifies a handle that uniquely identifies this vacation action.
 	// This can be used to manage multiple vacation responses.
 	Handle string
+
+	// HandleSet distinguishes an explicit empty handle from an omitted handle.
+	HandleSet bool
 
 	// Reason is the message body to be used in the autoresponse.
 	Reason string
@@ -99,16 +111,42 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 	}
 
 	d.VacationResponses[sender] = VacationResponse{
-		From:    from,
-		Subject: subject,
-		Body:    reason,
-		IsMime:  c.Mime,
-		Handle:  handle,
-		Days:    c.Days,
+		From:             from,
+		Subject:          subject,
+		Body:             reason,
+		IsMime:           c.Mime,
+		Handle:           handle,
+		ResponseIdentity: c.responseIdentity(),
+		Days:             c.Days,
 	}
 
 	// Per RFC 5230 Section 4: "The vacation action does not cancel the implicit keep."
 	// Therefore, we do NOT set d.ImplicitKeep = false here.
 
 	return nil
+}
+
+func (c CmdVacation) responseIdentity() string {
+	// Length prefixes preserve tuple boundaries, including empty arguments.
+	// The two domains keep an explicit handle separate from synthesized keys.
+	h := sha256.New()
+	write := func(value string) {
+		var size [8]byte
+		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+		h.Write(size[:])
+		h.Write([]byte(value))
+	}
+	if c.HandleSet || c.Handle != "" {
+		write(c.Handle)
+		return fmt.Sprintf("v1:h:%x", h.Sum(nil))
+	}
+	write(c.Subject)
+	write(c.From)
+	if c.Mime {
+		write("1")
+	} else {
+		write("0")
+	}
+	write(c.Reason)
+	return fmt.Sprintf("v1:r:%x", h.Sum(nil))
 }

@@ -61,6 +61,7 @@ func loadVacation(s *Script, pcmd parser.Cmd) (Cmd, error) {
 				MaxStrCount: 1,
 				MatchStr: func(val []string) {
 					cmd.Handle = val[0]
+					cmd.HandleSet = true
 				},
 			},
 		},
