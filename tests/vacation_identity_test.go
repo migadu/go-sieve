@@ -53,6 +53,11 @@ func TestVacationResponseIdentity(t *testing.T) {
 		{"different explicit handles", `vacation :handle "one" "Away";`, `vacation :handle "two" "Away";`, false},
 		{"empty explicit handle", `vacation :handle "" "A";`, `vacation :handle "" "B";`, true},
 		{"empty handle distinct from omitted", `vacation :handle "" "Away";`, `vacation "Away";`, false},
+		// An omitted :subject gets the default subject, an explicit empty one is
+		// kept (RFC 5230 section 5.3): the arguments and the replies differ, so
+		// they are separate responses (section 4.2).
+		{"empty subject distinct from omitted", `vacation :subject "" "Away";`, `vacation "Away";`, false},
+		{"empty subjects", `vacation :subject "" "Away";`, `vacation :subject "" "Away";`, true},
 		{"unexpanded implicit tuple", `set "name" "Alice"; vacation :subject "${name}" :from "${name}@example.com" "Away ${name}";`, `set "name" "Bob"; vacation :subject "${name}" :from "${name}@example.com" "Away ${name}";`, true},
 		{"unexpanded explicit handle", `set "name" "Alice"; vacation :handle "${name}" "Away";`, `set "name" "Bob"; vacation :handle "${name}" "Away";`, true},
 	} {
@@ -67,5 +72,30 @@ func TestVacationResponseIdentity(t *testing.T) {
 	_, reply := evaluate(t, `set "name" "Alice"; vacation :subject "Hello ${name}" :handle "${name}" "Away ${name}";`)
 	if reply.Subject != "Hello Alice" || reply.Handle != "Alice" || reply.Body != "Away Alice" {
 		t.Fatalf("rendered fields no longer expand: %+v", reply)
+	}
+}
+
+// TestVacationResponseIdentityIsStable pins identities that consumers have stored
+// for RFC 5230 section 4.2 tracking: a changed key sends one more response to every
+// sender still inside its :days window.
+func TestVacationResponseIdentityIsStable(t *testing.T) {
+	for script, want := range map[string]string{
+		`vacation "Away";`:                 "v1:r:a39585b336bbc917d9e3255bb6d7a98f0954405c17c42d745a1937fd67bb4beb",
+		`vacation :subject "Away" "Away";`: "v1:r:ede262faa761eeb2930255dbed5d6b5beef895b7dc4e719f9f983360c7e6ceb4",
+		`vacation :handle "away" "Away";`:  "v1:h:2478d85065bcf563c04fcac130cbedb96924875c6db20bde13edeb8de18be9bc",
+	} {
+		opts := sieve.DefaultOptions()
+		opts.EnabledExtensions = []string{"vacation"}
+		s, err := sieve.Load(strings.NewReader(`require "vacation"; `+script), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := sieve.NewRuntimeData(s, interp.DummyPolicy{}, interp.EnvelopeStatic{From: "sender@example.com", To: "owner@example.com"}, interp.MessageStatic{})
+		if err := s.Execute(context.Background(), d); err != nil {
+			t.Fatal(err)
+		}
+		if got := d.VacationResponses["sender@example.com"].ResponseIdentity; got != want {
+			t.Errorf("%s: identity %q, want %q", script, got, want)
+		}
 	}
 }

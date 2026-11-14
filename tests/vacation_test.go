@@ -224,6 +224,29 @@ func TestVacation(t *testing.T) {
 	}
 }
 
+// TestVacationCommandSubjectWithoutSubjectSet covers a CmdVacation built in code
+// rather than parsed: a nonempty Subject is the subject even without SubjectSet,
+// as a nonempty Handle is the handle without HandleSet.
+func TestVacationCommandSubjectWithoutSubjectSet(t *testing.T) {
+	opts := sieve.DefaultOptions()
+	opts.EnabledExtensions = []string{"vacation"}
+	script, err := sieve.Load(strings.NewReader(`require "vacation";`), opts)
+	if err != nil {
+		t.Fatalf("Failed to load script: %v", err)
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Subject", "Original subject")
+	env := interp.EnvelopeStatic{From: "sender@example.com", To: "recipient@example.com"}
+	data := sieve.NewRuntimeData(script, interp.DummyPolicy{}, env, interp.MessageStatic{Header: header})
+	cmd := interp.CmdVacation{Days: 7, Subject: "Out of office", Reason: "Away."}
+	if err := cmd.Execute(context.Background(), data); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := data.VacationResponses["sender@example.com"].Subject; got != "Out of office" {
+		t.Errorf("Expected subject %q, got %q", "Out of office", got)
+	}
+}
+
 // TestVacationNullSenderRunsTheRestOfTheScript covers a message with a null envelope
 // sender (a bounce, DSN or MDN): vacation does nothing and the actions next to it still
 // happen. It used to fail the whole script, so such a message skipped every filter in a
