@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/migadu/go-sieve/lexer"
 	"github.com/migadu/go-sieve/parser"
 )
 
@@ -54,6 +55,26 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 // character, and leading and trailing spaces MUST be ignored."
 func flagNames(list string) []string {
 	return strings.FieldsFunc(list, func(r rune) bool { return r == ' ' })
+}
+
+// distinctFlags splits the flag lists in src like canonicalFlags and drops a
+// flag that repeats an earlier one, but keeps each flag's spelling and order,
+// as hasflag compares them with the script's comparator (RFC 5232 §4).
+func distinctFlags(src []string) []string {
+	var flags []string
+	seen := make(map[string]struct{})
+	for _, list := range src {
+		for _, f := range flagNames(list) {
+			// RFC 3501: Flags are case-insensitive.
+			lf := strings.ToLower(f)
+			if _, ok := seen[lf]; ok {
+				continue
+			}
+			seen[lf] = struct{}{}
+			flags = append(flags, f)
+		}
+	}
+	return flags
 }
 
 func loadFileInto(s *Script, pcmd parser.Cmd) (Cmd, error) {
@@ -175,67 +196,101 @@ func loadDiscard(s *Script, pcmd parser.Cmd) (Cmd, error) {
 }
 
 func loadSetFlag(s *Script, pcmd parser.Cmd) (Cmd, error) {
-	if !s.RequiresExtension("imap4flags") {
-		return nil, parser.ErrorAt(pcmd.Position, "missing require 'imap4flags")
-	}
-	cmd := CmdSetFlag{}
-	err := LoadSpec(s, &Spec{
-		Pos: []SpecPosArg{
-			{
-				MinStrCount: 1,
-				MatchStr: func(val []string) {
-					cmd.Flags = canonicalFlags(val, nil, nil)
-				},
-			},
-		},
-	}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	variable, flags, err := loadFlagAction(s, pcmd)
 	if err != nil {
 		return nil, err
 	}
-
-	return cmd, nil
+	return CmdSetFlag{Variable: variable, Flags: flags}, nil
 }
 
 func loadAddFlag(s *Script, pcmd parser.Cmd) (Cmd, error) {
-	if !s.RequiresExtension("imap4flags") {
-		return nil, parser.ErrorAt(pcmd.Position, "missing require 'imap4flags")
-	}
-	cmd := CmdAddFlag{}
-	err := LoadSpec(s, &Spec{
-		Pos: []SpecPosArg{
-			{
-				MinStrCount: 1,
-				MatchStr: func(val []string) {
-					cmd.Flags = canonicalFlags(val, nil, nil)
-				},
-			},
-		},
-	}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	variable, flags, err := loadFlagAction(s, pcmd)
 	if err != nil {
 		return nil, err
 	}
-
-	return cmd, nil
+	return CmdAddFlag{Variable: variable, Flags: flags}, nil
 }
 
 func loadRemoveFlag(s *Script, pcmd parser.Cmd) (Cmd, error) {
-	if !s.RequiresExtension("imap4flags") {
-		return nil, parser.ErrorAt(pcmd.Position, "missing require 'imap4flags")
-	}
-	cmd := CmdRemoveFlag{}
-	err := LoadSpec(s, &Spec{
-		Pos: []SpecPosArg{
-			{
-				MinStrCount: 1,
-				MatchStr: func(val []string) {
-					cmd.Flags = canonicalFlags(val, nil, nil)
-				},
-			},
-		},
-	}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	variable, flags, err := loadFlagAction(s, pcmd)
 	if err != nil {
 		return nil, err
 	}
+	return CmdRemoveFlag{Variable: variable, Flags: flags}, nil
+}
 
-	return cmd, nil
+// loadFlagAction loads the arguments of setflag, addflag and removeflag (RFC
+// 5232 §3): "[<variablename: string>] <list-of-flags: string-list>". The
+// variable name is "" for the internal variable.
+func loadFlagAction(s *Script, pcmd parser.Cmd) (string, Flags, error) {
+	if !s.RequiresExtension("imap4flags") {
+		return "", nil, parser.ErrorAt(pcmd.Position, "missing require 'imap4flags")
+	}
+	var args flagArgs
+	err := LoadSpec(s, &Spec{Pos: args.spec()}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	if err != nil {
+		return "", nil, err
+	}
+	variables, flags, err := args.split(s, pcmd.Position, true)
+	if err != nil {
+		return "", nil, err
+	}
+	variable := ""
+	if variables != nil {
+		variable = variables[0]
+	}
+	return variable, canonicalFlags(flags, nil, nil), nil
+}
+
+// flagArgs collects the positional arguments of the imap4flags actions and
+// hasflag: an optional variable name (RFC 5232 §3), or variable list for
+// hasflag (§4), before the list of flags. Which of the two a lone argument is
+// shows only once all are loaded, so split sorts them out after LoadSpec.
+type flagArgs struct {
+	first, second []string
+}
+
+func (a *flagArgs) spec() []SpecPosArg {
+	return []SpecPosArg{
+		{
+			MinStrCount: 1,
+			MatchStr:    func(val []string) { a.first = val },
+		},
+		{
+			Optional:    true,
+			MinStrCount: 1,
+			MatchStr:    func(val []string) { a.second = val },
+		},
+	}
+}
+
+// split returns the variable names, lower-cased, or nil for the internal
+// variable, and the list of flags. An action's variable is one name it can
+// set; hasflag's are names it can read.
+func (a *flagArgs) split(s *Script, pos lexer.Position, action bool) (variables, flags []string, err error) {
+	if a.second == nil {
+		return nil, a.first, nil
+	}
+	// RFC 5232 §3: "If the SIEVE interpreter doesn't support the "variables"
+	// extension [VARIABLES], the presence of the variable name parameter will
+	// cause a runtime error [SIEVE]." A script must require an extension to
+	// use it, so it is refused when it loads, as Pigeonhole does.
+	if !s.RequiresExtension("variables") {
+		return nil, nil, parser.ErrorAt(pos, "a variable name needs require 'variables'")
+	}
+	if action && len(a.first) != 1 {
+		return nil, nil, parser.ErrorAt(pos, "the variable name must be a single string")
+	}
+	variables = make([]string, len(a.first))
+	for i, name := range a.first {
+		usable, gettable := s.IsVarUsable(name)
+		if !action {
+			usable = gettable
+		}
+		if !usable {
+			return nil, nil, parser.ErrorAt(pos, "%q is not a usable variable name", name)
+		}
+		variables[i] = strings.ToLower(name)
+	}
+	return variables, a.second, nil
 }
