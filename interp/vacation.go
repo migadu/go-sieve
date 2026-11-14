@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // VacationResponse represents an autoresponse to be sent.
@@ -12,7 +13,9 @@ type VacationResponse struct {
 	// From is the address to be used in the From header of the autoresponse.
 	From string
 
-	// Subject is the subject to be used in the autoresponse.
+	// Subject is the subject to be used in the autoresponse: the :subject
+	// argument, or by default "Auto: " followed by the original subject, or
+	// "Automated reply" when the message has none (RFC 5230 section 5.3).
 	Subject string
 
 	// Body is the message body to be used in the autoresponse.
@@ -32,6 +35,11 @@ type VacationResponse struct {
 
 	// Days specifies the minimum number of days between autoresponses to the same sender.
 	Days int
+
+	// Addresses is the :addresses argument after variable expansion: addresses
+	// that belong to the recipient in addition to those the implementation knows
+	// of, for the personal message check of RFC 5230 section 4.5.
+	Addresses []string
 }
 
 // CmdVacation represents the vacation command as defined in RFC 5230.
@@ -41,7 +49,7 @@ type CmdVacation struct {
 	Days int
 
 	// Subject specifies the subject to be used in the autoresponse.
-	// Default is "Automated reply" if not specified.
+	// Default is "Auto: " and the original subject if not specified.
 	Subject string
 
 	// From specifies the address to be used in the From header of the autoresponse.
@@ -75,7 +83,7 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 	// Expand variables in all string fields
 	subject := expandVars(d, c.Subject)
 	if subject == "" {
-		subject = "Automated reply"
+		subject = defaultVacationSubject(d)
 	}
 
 	from := expandVars(d, c.From)
@@ -118,12 +126,28 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 		Handle:           handle,
 		ResponseIdentity: c.responseIdentity(),
 		Days:             c.Days,
+		Addresses:        addresses,
 	}
 
 	// Per RFC 5230 Section 4: "The vacation action does not cancel the implicit keep."
 	// Therefore, we do NOT set d.ImplicitKeep = false here.
 
 	return nil
+}
+
+// defaultVacationSubject is the subject of a reply without :subject (RFC 5230
+// section 5.3): "The subject is set to the characters "Auto: " followed by the
+// original subject. An appropriate fixed Subject, such as "Automated reply",
+// SHOULD be used in the event that :subject isn't specified and the original
+// message doesn't contain a Subject field." The original is decoded (RFC 2047),
+// as the reply's subject is given unencoded.
+func defaultVacationSubject(d *RuntimeData) string {
+	if values, err := d.Msg.HeaderGet("Subject"); err == nil && len(values) > 0 {
+		if original := strings.TrimSpace(decodeHeaderValue(values[0])); original != "" {
+			return "Auto: " + original
+		}
+	}
+	return "Automated reply"
 }
 
 func (c CmdVacation) responseIdentity() string {
