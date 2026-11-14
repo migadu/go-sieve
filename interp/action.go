@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 type CmdStop struct{}
@@ -106,38 +107,64 @@ func (c CmdDiscard) Execute(_ context.Context, d *RuntimeData) error {
 }
 
 type CmdSetFlag struct {
-	Flags Flags
+	Variable string // the variable named (RFC 5232 §3), "" for the internal one
+	Flags    Flags
 }
 
 func (c CmdSetFlag) Execute(_ context.Context, d *RuntimeData) error {
-	if c.Flags != nil {
-		d.Flags = canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases)
-	}
-	return nil
+	return d.setFlagVar(c.Variable, canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases))
 }
 
 type CmdAddFlag struct {
-	Flags Flags
+	Variable string // the variable named (RFC 5232 §3), "" for the internal one
+	Flags    Flags
 }
 
 func (c CmdAddFlag) Execute(_ context.Context, d *RuntimeData) error {
-	if c.Flags != nil {
-		// The first addflag canonicalises too: a variable can expand to a
-		// space-separated list of flags (RFC 5232 §2), and canonicalFlags also
-		// lower-cases, applies aliases and removes duplicates.
-		d.Flags = canonicalFlags(append(d.Flags, expandVarsList(d, c.Flags)...), nil, d.FlagAliases)
+	flags, err := d.flagVar(c.Variable)
+	if err != nil {
+		return err
 	}
-	return nil
+	// Every addflag canonicalises: a variable can expand to a space-separated
+	// list of flags (RFC 5232 §2), and canonicalFlags also lower-cases,
+	// applies aliases and removes duplicates.
+	return d.setFlagVar(c.Variable, canonicalFlags(append(flags, expandVarsList(d, c.Flags)...), nil, d.FlagAliases))
 }
 
 type CmdRemoveFlag struct {
-	Flags Flags
+	Variable string // the variable named (RFC 5232 §3), "" for the internal one
+	Flags    Flags
 }
 
 func (c CmdRemoveFlag) Execute(_ context.Context, d *RuntimeData) error {
-	if c.Flags != nil {
-		// Use canonicalFlags to remove duplicates
-		d.Flags = canonicalFlags(d.Flags, expandVarsList(d, c.Flags), d.FlagAliases)
+	flags, err := d.flagVar(c.Variable)
+	if err != nil {
+		return err
 	}
-	return nil
+	return d.setFlagVar(c.Variable, canonicalFlags(flags, expandVarsList(d, c.Flags), d.FlagAliases))
+}
+
+// flagVar returns the flags of the variable an imap4flags action or test names,
+// or of the internal variable for "".
+func (d *RuntimeData) flagVar(name string) ([]string, error) {
+	if name == "" {
+		return d.Flags, nil
+	}
+	value, err := d.Var(name)
+	if err != nil {
+		return nil, err
+	}
+	return []string{value}, nil
+}
+
+// setFlagVar stores flags in the variable an imap4flags action names, or in the
+// internal variable for "". RFC 5232 §3: "On variable substitution, a set of
+// flags is represented as a string containing a space-separated list of flag
+// names."
+func (d *RuntimeData) setFlagVar(name string, flags Flags) error {
+	if name == "" {
+		d.Flags = flags
+		return nil
+	}
+	return d.SetVar(name, strings.Join(flags, " "))
 }

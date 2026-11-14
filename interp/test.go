@@ -351,6 +351,64 @@ func (t TrueTest) Check(context.Context, *RuntimeData) (bool, error) {
 	return true, nil
 }
 
+// HasFlagTest is the imap4flags hasflag test (RFC 5232 §4): "The hasflag test
+// evaluates to true if any of the variables matches any flag name."
+type HasFlagTest struct {
+	matcherTest
+
+	// Variables names the variables whose flags are tested, or is nil for the
+	// internal variable.
+	Variables []string
+}
+
+func (h HasFlagTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
+	var flags []string
+	if h.Variables == nil {
+		flags = distinctFlags(d.Flags)
+	} else {
+		for _, name := range h.Variables {
+			value, err := d.Var(name)
+			if err != nil {
+				return false, err
+			}
+			// "The :count of a variable returns the number of distinct flags
+			// in it.  The count of a list of variables is the sum of the
+			// counts of the member variables."
+			flags = append(flags, distinctFlags([]string{value})...)
+		}
+	}
+
+	if h.isCount() {
+		return h.countMatches(d, uint64(len(flags))), nil
+	}
+
+	if h.match != MatchIs && h.match != MatchContains {
+		for _, flag := range flags {
+			if ok, err := h.tryMatch(ctx, d, flag); ok || err != nil {
+				return ok, err
+			}
+		}
+		return false, nil
+	}
+
+	// An :is or :contains key is a list of flags as well (RFC 5232 §2), split
+	// once its variables are expanded, without empty strings: §4's "hasflag
+	// :is "b A"" is "hasflag ["b","A"]". The keys of the other match types,
+	// patterns and :value strings, stay whole, as in Pigeonhole.
+	keys := flagNames(strings.Join(expandVarsList(d, h.key), " "))
+	for _, flag := range flags {
+		for _, key := range keys {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			if ok, _, err := testString(ctx, h.comparator, h.match, h.relational, flag, key); ok || err != nil {
+				return ok, err
+			}
+		}
+	}
+	return false, nil
+}
+
 type HeaderTest struct {
 	matcherTest
 
