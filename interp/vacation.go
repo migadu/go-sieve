@@ -14,8 +14,9 @@ type VacationResponse struct {
 	From string
 
 	// Subject is the subject to be used in the autoresponse: the :subject
-	// argument, or by default "Auto: " followed by the original subject, or
-	// "Automated reply" when the message has none (RFC 5230 section 5.3).
+	// argument, which may be empty, or without one "Auto: " followed by the
+	// original subject, or "Automated reply" when the message has none (RFC
+	// 5230 section 5.3).
 	Subject string
 
 	// Body is the message body to be used in the autoresponse.
@@ -52,6 +53,10 @@ type CmdVacation struct {
 	// Default is "Auto: " and the original subject if not specified.
 	Subject string
 
+	// SubjectSet distinguishes an explicit empty subject from an omitted one:
+	// only the latter gets the default subject (RFC 5230 section 5.3).
+	SubjectSet bool
+
 	// From specifies the address to be used in the From header of the autoresponse.
 	// If not specified, the implementation should choose a sensible default.
 	From string
@@ -82,7 +87,7 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 
 	// Expand variables in all string fields
 	subject := expandVars(d, c.Subject)
-	if subject == "" {
+	if !c.SubjectSet {
 		subject = defaultVacationSubject(d)
 	}
 
