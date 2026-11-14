@@ -91,6 +91,44 @@ func TestVacation(t *testing.T) {
 			expectedRecipient: "sender@example.com",
 		},
 		{
+			// RFC 5230 §5.3 generates a subject only "If the :subject parameter is
+			// not supplied"; an explicit empty one is supplied, so it is kept.
+			name:              "ExplicitEmptySubjectIsKept",
+			script:            `require ["vacation"]; vacation :subject "" "Away.";`,
+			envFrom:           "sender@example.com",
+			subject:           "Original subject",
+			expectResponse:    true,
+			expectedSubject:   "",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			// The fixed subject is for a reply without :subject to a message without
+			// one, not for an explicit empty :subject.
+			name:              "ExplicitEmptySubjectWithoutAnOriginalIsKept",
+			script:            `require ["vacation"]; vacation :subject "" "Away.";`,
+			envFrom:           "sender@example.com",
+			expectResponse:    true,
+			expectedSubject:   "",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			// A :subject that expands to nothing was supplied all the same.
+			name: "SubjectExpandingToEmptyIsKept",
+			script: `require ["vacation", "variables"]; set "s" "";
+				vacation :subject "${s}" "Away.";`,
+			envFrom:           "sender@example.com",
+			subject:           "Original subject",
+			expectResponse:    true,
+			expectedSubject:   "",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
 			// RFC 5230 §4.5: the :addresses belong to the recipient for the personal
 			// message check, which the implementation makes, so it needs them expanded.
 			name: "AddressesAreExpandedForTheImplementation",
