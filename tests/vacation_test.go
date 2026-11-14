@@ -2,6 +2,8 @@ package tests
 
 import (
 	"context"
+	"net/textproto"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,8 +16,10 @@ func TestVacation(t *testing.T) {
 		name              string
 		script            string
 		envFrom           string
+		subject           string // the original message's Subject field, "" for none
 		expectResponse    bool
 		expectedSubject   string
+		expectedAddresses []string
 		expectedBody      string
 		expectedFrom      string
 		expectedHandle    string
@@ -47,6 +51,58 @@ func TestVacation(t *testing.T) {
 			expectedHandle:    "vacation-001",
 			expectedDays:      14,
 			expectedRecipient: "sender@example.com",
+			expectedAddresses: []string{"me@example.com", "me2@example.com"},
+		},
+		{
+			// RFC 5230 §5.3: without :subject, "The subject is set to the characters
+			// "Auto: " followed by the original subject."
+			name:              "DefaultSubjectFollowsTheOriginal",
+			script:            `require ["vacation"]; vacation "Away.";`,
+			envFrom:           "sender@example.com",
+			subject:           "Project update",
+			expectResponse:    true,
+			expectedSubject:   "Auto: Project update",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			// The original subject is decoded (RFC 2047) before it is reused.
+			name:              "DefaultSubjectDecodesTheOriginal",
+			script:            `require ["vacation"]; vacation "Away.";`,
+			envFrom:           "sender@example.com",
+			subject:           "=?utf-8?q?R=C3=A9union?=",
+			expectResponse:    true,
+			expectedSubject:   "Auto: Réunion",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			// An explicit :subject is used as given.
+			name:              "ExplicitSubjectIgnoresTheOriginal",
+			script:            `require ["vacation"]; vacation :subject "Away" "Away.";`,
+			envFrom:           "sender@example.com",
+			subject:           "Project update",
+			expectResponse:    true,
+			expectedSubject:   "Away",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+		},
+		{
+			// RFC 5230 §4.5: the :addresses belong to the recipient for the personal
+			// message check, which the implementation makes, so it needs them expanded.
+			name: "AddressesAreExpandedForTheImplementation",
+			script: `require ["vacation", "variables"]; set "alt" "user@example.net";
+				vacation :addresses ["${alt}", "other@example.org"] "Away.";`,
+			envFrom:           "sender@example.com",
+			expectResponse:    true,
+			expectedSubject:   "Automated reply",
+			expectedBody:      "Away.",
+			expectedDays:      7,
+			expectedRecipient: "sender@example.com",
+			expectedAddresses: []string{"user@example.net", "other@example.org"},
 		},
 		{
 			name:           "NoVacationResponseToOwnAddresses",
@@ -69,7 +125,7 @@ func TestVacation(t *testing.T) {
 			ctx := context.Background()
 
 			opts := sieve.DefaultOptions()
-			opts.EnabledExtensions = []string{"vacation"}
+			opts.EnabledExtensions = []string{"vacation", "variables"}
 
 			parsedScript, err := sieve.Load(strings.NewReader(tc.script), opts)
 			if err != nil {
@@ -81,7 +137,11 @@ func TestVacation(t *testing.T) {
 				To:   "recipient@example.com",
 			}
 
-			data := sieve.NewRuntimeData(parsedScript, interp.DummyPolicy{}, env, interp.MessageStatic{})
+			header := textproto.MIMEHeader{}
+			if tc.subject != "" {
+				header.Set("Subject", tc.subject)
+			}
+			data := sieve.NewRuntimeData(parsedScript, interp.DummyPolicy{}, env, interp.MessageStatic{Header: header})
 
 			err = parsedScript.Execute(ctx, data)
 			if err != nil {
@@ -118,6 +178,9 @@ func TestVacation(t *testing.T) {
 			}
 			if resp.Days != tc.expectedDays {
 				t.Errorf("Expected days %d, got %d", tc.expectedDays, resp.Days)
+			}
+			if !slices.Equal(resp.Addresses, tc.expectedAddresses) {
+				t.Errorf("Expected addresses %q, got %q", tc.expectedAddresses, resp.Addresses)
 			}
 		})
 	}
