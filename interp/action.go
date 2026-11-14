@@ -122,15 +122,10 @@ type CmdAddFlag struct {
 
 func (c CmdAddFlag) Execute(_ context.Context, d *RuntimeData) error {
 	if c.Flags != nil {
-		flags := expandVarsList(d, c.Flags)
-
-		if d.Flags == nil {
-			d.Flags = make([]string, len(flags))
-			copy(d.Flags, flags)
-		} else {
-			// Use canonicalFlags to remove duplicates
-			d.Flags = canonicalFlags(append(d.Flags, flags...), nil, d.FlagAliases)
-		}
+		// The first addflag canonicalises too: a variable can expand to a
+		// space-separated list of flags (RFC 5232 §2), and canonicalFlags also
+		// lower-cases, applies aliases and removes duplicates.
+		d.Flags = canonicalFlags(append(d.Flags, expandVarsList(d, c.Flags)...), nil, d.FlagAliases)
 	}
 	return nil
 }
