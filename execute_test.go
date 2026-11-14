@@ -903,4 +903,32 @@ func TestFlags(t *testing.T) {
 			ImplicitKeep: true, // keep does NOT cancel implicit keep
 		})
 	})
+	t.Run("first-addflag-splits-a-variable", func(t *testing.T) {
+		// RFC 5232 §2: "A string containing a space-separated list of flag
+		// names is equivalent to a string list consisting of the flags." The
+		// variable is expanded at run time, so the first addflag has to split
+		// it as setflag and every later addflag do.
+		script := `require ["imap4flags", "variables"]; set "f" "\\Seen \\Flagged"; addflag "${f}";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Flags:        []string{"\\flagged", "\\seen"},
+			ImplicitKeep: true,
+		})
+	})
+	t.Run("flag-list-empty-strings-and-extra-spaces", func(t *testing.T) {
+		// RFC 5232 §2: "A Sieve interpreter MUST ignore empty strings (i.e.,
+		// "") in a list-of-flags parameter." and "multiple spaces between flag
+		// names MUST be treated as a single space character, and leading and
+		// trailing spaces MUST be ignored." A list amalgamated in a variable
+		// starts with a space.
+		script := `require ["imap4flags", "variables"];
+			set "f" "";
+			set "f" "${f} \\Seen";
+			set "f" "${f}  \\Flagged ";
+			setflag ["", "${f}"];
+			addflag "Work  Later ";`
+		testExecute(ctx, t, script, eml, false, Result{
+			Flags:        []string{"\\flagged", "\\seen", "later", "work"},
+			ImplicitKeep: true,
+		})
+	})
 }

@@ -19,7 +19,7 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 	c := make(Flags, 0, len(src))
 	fm := make(map[string]struct{})
 	for _, fl := range src {
-		for _, f := range strings.Split(fl, " ") {
+		for _, f := range flagNames(fl) {
 			// RFC 3501: Flags are case-insensitive.
 			f = strings.ToLower(f)
 			if fc, ok := aliases[f]; ok {
@@ -30,7 +30,7 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 		}
 	}
 	for _, fl := range remove {
-		for _, f := range strings.Split(fl, " ") {
+		for _, f := range flagNames(fl) {
 			// RFC 3501: Flags are case-insensitive.
 			f = strings.ToLower(f)
 			if fc, ok := aliases[f]; ok {
@@ -45,6 +45,15 @@ func canonicalFlags(src []string, remove Flags, aliases map[string]string) Flags
 	}
 	sort.Strings(c)
 	return c
+}
+
+// flagNames splits one string of a list-of-flags parameter. RFC 5232 §2: "A
+// string containing a space-separated list of flag names is equivalent to a
+// string list consisting of the flags.", empty strings are ignored, and
+// "multiple spaces between flag names MUST be treated as a single space
+// character, and leading and trailing spaces MUST be ignored."
+func flagNames(list string) []string {
+	return strings.FieldsFunc(list, func(r rune) bool { return r == ' ' })
 }
 
 func loadFileInto(s *Script, pcmd parser.Cmd) (Cmd, error) {
