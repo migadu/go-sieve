@@ -87,7 +87,7 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 
 	// Expand variables in all string fields
 	subject := expandVars(d, c.Subject)
-	if !c.SubjectSet {
+	if !c.SubjectSet && c.Subject == "" {
 		subject = defaultVacationSubject(d)
 	}
 
@@ -177,5 +177,12 @@ func (c CmdVacation) responseIdentity() string {
 		write("0")
 	}
 	write(c.Reason)
+	// An explicit empty :subject is another argument than an omitted one, and
+	// gets another reply (RFC 5230 section 5.3), so it adds a field. Appended,
+	// it cannot collide with a four-field tuple, and the keys already stored
+	// for every other tuple stay the same.
+	if c.SubjectSet && c.Subject == "" {
+		write("")
+	}
 	return fmt.Sprintf("v1:r:%x", h.Sum(nil))
 }
