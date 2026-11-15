@@ -28,6 +28,11 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 		d.MailboxFlags = make(map[string][]string)
 	}
 	d.MailboxFlags[mailbox] = copyFlags(d, c.Flags)
+	d.storeOrder++
+	if d.MailboxStoreOrder == nil {
+		d.MailboxStoreOrder = make(map[string]uint64)
+	}
+	d.MailboxStoreOrder[mailbox] = d.storeOrder
 
 	// A fileinto naming a mailbox already filed into is performed all the same,
 	// so its :create and its cancelling of the implicit keep apply; only the
@@ -111,6 +116,8 @@ func (c CmdKeep) Execute(_ context.Context, d *RuntimeData) error {
 	// Kept twice, the message still gets one copy, with the last flag list
 	// (RFC 5232 §3).
 	d.KeepFlags = copyFlags(d, c.Flags)
+	d.storeOrder++
+	d.KeepStoreOrder = d.storeOrder
 	return nil
 }
 

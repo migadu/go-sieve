@@ -71,6 +71,15 @@ type RuntimeData struct {
 	Keep         bool
 	ImplicitKeep bool
 
+	// MailboxStoreOrder records the last fileinto to each exact MailboxFlags
+	// key. KeepStoreOrder records the last explicit keep, or is zero when
+	// there was none. A larger value ran later: callers that equate mailbox
+	// spellings or merge fileinto INBOX with keep can use the last action's
+	// flags (RFC 5232 section 3). Only one counter per destination is kept.
+	MailboxStoreOrder map[string]uint64
+	KeepStoreOrder    uint64
+	storeOrder        uint64
+
 	FlagAliases map[string]string
 
 	MatchVariables []string
@@ -123,6 +132,8 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		MailboxesCreate: make([]string, len(d.MailboxesCreate)),
 		Flags:           make([]string, len(d.Flags)),
 		KeepFlags:       append([]string(nil), d.KeepFlags...),
+		KeepStoreOrder:  d.KeepStoreOrder,
+		storeOrder:      d.storeOrder,
 		Keep:            d.Keep,
 		ImplicitKeep:    d.ImplicitKeep,
 		Rejected:        d.Rejected,
@@ -155,6 +166,13 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		newData.MailboxFlags = make(map[string][]string, len(d.MailboxFlags))
 		for k, v := range d.MailboxFlags {
 			newData.MailboxFlags[k] = append([]string(nil), v...)
+		}
+	}
+
+	if d.MailboxStoreOrder != nil {
+		newData.MailboxStoreOrder = make(map[string]uint64, len(d.MailboxStoreOrder))
+		for mailbox, order := range d.MailboxStoreOrder {
+			newData.MailboxStoreOrder[mailbox] = order
 		}
 	}
 
