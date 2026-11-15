@@ -35,7 +35,9 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 		},
 	}
 	mods.addSpecTags(spec.Tags)
-	err := LoadSpec(script, spec, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
+	if err := LoadSpec(script, spec, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block); err != nil {
+		return nil, err
+	}
 
 	if mods.conflicting {
 		return nil, parser.ErrorAt(pcmd.Position, "conflicting value modifiers")
@@ -48,7 +50,7 @@ func loadSet(script *Script, pcmd parser.Cmd) (Cmd, error) {
 
 	cmd.ModifyValue = mods.apply(script)
 
-	return cmd, err
+	return cmd, nil
 }
 
 // valueModifiers collects a command's RFC 5229 §4.4 value modifiers (:lower,
@@ -202,11 +204,6 @@ func loadStringTest(s *Script, test parser.Test) (Test, error) {
 
 	if err := loaded.setKey(s, key); err != nil {
 		return nil, err
-	}
-
-	// Check if regex extension is required
-	if loaded.match == MatchRegex && !s.RequiresExtension("regex") {
-		return nil, fmt.Errorf("missing require 'regex'")
 	}
 
 	return loaded, nil

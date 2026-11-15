@@ -20,16 +20,21 @@ type CmdFileInto struct {
 
 func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 	mailbox := expandVars(d, c.Mailbox)
-	found := false
-	for _, m := range d.Mailboxes {
-		if m == mailbox {
-			found = true
-		}
+	// A mailbox filed into again still gets one copy, and RFC 5232 §3: "the
+	// last flag list value MUST win".
+	if d.MailboxFlags == nil {
+		d.MailboxFlags = make(map[string][]string)
 	}
-	if found {
-		return nil
+	d.MailboxFlags[mailbox] = copyFlags(d, c.Flags)
+
+	// A fileinto naming a mailbox already filed into is performed all the same,
+	// so its :create and its cancelling of the implicit keep apply; only the
+	// message is not stored there twice (RFC 5228 §2.10.3).
+
+	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
+	if !c.Copy {
+		d.ImplicitKeep = false
 	}
-	d.Mailboxes = append(d.Mailboxes, mailbox)
 
 	// RFC 5490: Track mailboxes that should be created
 	if c.Create {
@@ -45,15 +50,25 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 		}
 	}
 
-	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
-	if !c.Copy {
-		d.ImplicitKeep = false
+	for _, m := range d.Mailboxes {
+		if m == mailbox {
+			return nil
+		}
 	}
-
-	if c.Flags != nil {
-		d.Flags = canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases)
-	}
+	d.Mailboxes = append(d.Mailboxes, mailbox)
 	return nil
+}
+
+// copyFlags returns the flags the copy a keep or fileinto stores is given (RFC
+// 5232 §5): "The copy of the message filed into the mailbox will have only flags
+// listed after the :flags tagged argument", and without :flags (§3) "the current
+// value of the internal variable is used instead". Neither changes the internal
+// variable, d.Flags.
+func copyFlags(d *RuntimeData, flags Flags) []string {
+	if flags != nil {
+		return canonicalFlags(expandVarsList(d, flags), nil, d.FlagAliases)
+	}
+	return append([]string(nil), d.Flags...)
 }
 
 type CmdRedirect struct {
@@ -91,9 +106,9 @@ type CmdKeep struct {
 func (c CmdKeep) Execute(_ context.Context, d *RuntimeData) error {
 	d.Keep = true
 	// keep is a non-terminating action - it does NOT cancel implicit keep
-	if c.Flags != nil {
-		d.Flags = canonicalFlags(expandVarsList(d, c.Flags), nil, d.FlagAliases)
-	}
+	// Kept twice, the message still gets one copy, with the last flag list
+	// (RFC 5232 §3).
+	d.KeepFlags = copyFlags(d, c.Flags)
 	return nil
 }
 
@@ -101,7 +116,6 @@ type CmdDiscard struct{}
 
 func (c CmdDiscard) Execute(_ context.Context, d *RuntimeData) error {
 	d.ImplicitKeep = false
-	d.Flags = make([]string, 0)
 	return nil
 }
 

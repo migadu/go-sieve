@@ -46,7 +46,9 @@ type Spec struct {
 
 func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg, tests []parser.Test, block []parser.Cmd) error {
 	var lastTag *SpecTag
+	var lastTagArg parser.TagArg
 	nextPosArg := 0
+	seenTags := map[string]bool{}
 	for _, a := range args {
 		switch a := a.(type) {
 		case parser.StringArg:
@@ -200,16 +202,36 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 			if lastTag != nil && lastTag.NeedsValue {
 				return lexer.ErrorAt(a, "LoadSpec: tagged argument requires a value")
 			}
+			// RFC 5228 §2.6.2: "Tagged arguments must appear before
+			// positional arguments".
+			if nextPosArg > 0 {
+				return lexer.ErrorAt(a, "LoadSpec: tagged argument :%s after positional arguments", a.Value)
+			}
 			tag, ok := spec.Tags[strings.ToLower(a.Value)]
 			if !ok {
 				return lexer.ErrorAt(a, "LoadSpec: unknown tagged argument: %v", a.Value)
 			}
+			// RFC 5228 §2.6: "It is an error for a script, on a single
+			// command, [...] to use a tagged or optional argument more
+			// than once." Tags are case-insensitive (§8.1).
+			name := strings.ToLower(a.Value)
+			if seenTags[name] {
+				return lexer.ErrorAt(a, "LoadSpec: tagged argument :%s given more than once", a.Value)
+			}
+			seenTags[name] = true
 			if tag.NeedsValue {
 				lastTag = &tag
+				lastTagArg = a
 			} else {
 				tag.MatchBool()
 			}
 		}
+	}
+	// A tag that takes a value cannot end the arguments: the value is part
+	// of the tag's syntax (RFC 5232 §5: "Usage:   ":flags" <list-of-flags:
+	// string-list>").
+	if lastTag != nil && lastTag.NeedsValue {
+		return lexer.ErrorAt(lastTagArg, "LoadSpec: tagged argument :%s requires a value", lastTagArg.Value)
 	}
 	for i := nextPosArg; i < len(spec.Pos); i++ {
 		if !spec.Pos[i].Optional {

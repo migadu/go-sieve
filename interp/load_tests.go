@@ -252,11 +252,6 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 		return nil, err
 	}
 
-	// Check if regex extension is required
-	if loaded.match == MatchRegex && !s.RequiresExtension("regex") {
-		return nil, fmt.Errorf("missing require 'regex'")
-	}
-
 	return loaded, nil
 }
 
@@ -289,8 +284,11 @@ func loadSizeTest(s *Script, test parser.Test) (Test, error) {
 			},
 		},
 	}, test.Position, test.Args, test.Tests, nil)
+	if err != nil {
+		return nil, err
+	}
 	if loaded.Under == loaded.Over {
 		return nil, fmt.Errorf("loadSizeTest: either under or over is required")
 	}
-	return loaded, err
+	return loaded, nil
 }

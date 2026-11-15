@@ -105,12 +105,18 @@ func loadDeleteHeader(s *Script, pcmd parser.Cmd) (Cmd, error) {
 		return nil, parser.ErrorAt(pcmd.Position, ":last can only be specified with :index")
 	}
 
-	// Set up the key for matcher if value patterns are provided
+	// RFC 5293 §5: "If no value-patterns are specified, then the comparator
+	// and match-type options are silently ignored." An option that is wrong
+	// in itself is still an error, an unrequired comparator included (RFC 5228
+	// §2.7.3); how the comparator fits the match type is checked only against
+	// value patterns, as in Pigeonhole.
 	if len(cmd.ValuePatterns) > 0 {
 		err = cmd.matcherTest.setKey(s, cmd.ValuePatterns)
-		if err != nil {
-			return nil, parser.ErrorAt(pcmd.Position, "deleteheader: %v", err)
-		}
+	} else {
+		err = cmd.matcherTest.checkOptions(s)
+	}
+	if err != nil {
+		return nil, parser.ErrorAt(pcmd.Position, "deleteheader: %v", err)
 	}
 
 	return cmd, nil
