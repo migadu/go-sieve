@@ -181,9 +181,14 @@ type parsedHeaderDate struct {
 	leapSecond bool
 }
 
+// obsYear matches a date-time (RFC 5322 §3.3) up to a year of two or three
+// digits (obs-year, §4.3): the digits right before the hour, which the field's
+// first colon follows.
+var obsYear = regexp.MustCompile(`^[^:]*[ \t](\d{2,3})[ \t]+\d{1,2}:`)
+
 // parseRFC5322Date parses an RFC 5322 date-time (§3.3) like net/mail.ParseDate,
 // but reads an alphabetic zone by RFC 5322 §4.3 instead of by the server's time
-// zone.
+// zone, and a two- or three-digit year by §4.3 too.
 //
 // net/mail.ParseDate gives an alphabetic zone the offset it has in time.Local,
 // and offset zero when time.Local does not know it: PDT is 02:23:25 UTC on a
@@ -197,6 +202,12 @@ type parsedHeaderDate struct {
 // be in the range 00:00:00 through 23:59:60"), is read as second 59 of the
 // same minute, as Dovecot reads it: time.Time cannot hold second 60, and
 // net/mail.ParseDate does not parse it.
+
+// net/mail.ParseDate reads a two-digit year with time.Parse's "06", which puts
+// 00-68 in 20xx, and does not parse a three-digit year (tm_year written as is
+// after 1999). §4.3 adds 2000 to a two-digit year from 00 to 49, and 1900 to
+// one from 50 to 99 "or any three digit year", so the year is written out in
+// four digits before parsing.
 func parseRFC5322Date(value string) (time.Time, error) {
 	parsed, err := parseRFC5322DateValue(value)
 	return parsed.Time, err
@@ -215,13 +226,21 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
 		isLeapSecond = true
 	}
+	if m := obsYear.FindStringSubmatchIndex(unfolded); m != nil {
+		year, _ := strconv.Atoi(unfolded[m[2]:m[3]])
+		if m[3]-m[2] == 2 && year < 50 {
+			year += 2000
+		} else {
+			year += 1900
+		}
+		unfolded = unfolded[:m[2]] + strconv.Itoa(year) + unfolded[m[3]:]
+	}
 	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
 		end := m[5]
 		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
 		// net/mail would discard the suffix after a numeric replacement. Keep
 		// its existing behavior for extensions it accepts, such as GMT+0000
-		// (unfolded is the value net/mail would see, with a leap second read
-		// as second 59).
+		// (unfolded has its year rewritten and a leap second read as 59).
 		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
 			t, err := mail.ParseDate(unfolded)
 			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
