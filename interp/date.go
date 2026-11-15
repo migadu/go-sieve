@@ -69,8 +69,9 @@ func extractDatePart(t time.Time, part DatePart) (string, error) {
 	case DatePartTime:
 		return t.Format("15:04:05"), nil
 	case DatePartISO8601:
-		// ISO 8601 format with timezone offset like +03:00
-		return t.Format("2006-01-02T15:04:05-07:00"), nil
+		// RFC 3339 date-time, with a zero offset as "Z" and not "+00:00"
+		// (RFC 5260 §4.2).
+		return t.Format("2006-01-02T15:04:05Z07:00"), nil
 	case DatePartStd11:
 		// RFC 2822/5322 format (originally from RFC 822)
 		return t.Format(time.RFC1123Z), nil
