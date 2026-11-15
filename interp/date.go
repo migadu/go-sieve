@@ -230,18 +230,20 @@ func parseDateHeader(value string) (time.Time, error) {
 // It extracts a date-time from a header field and compares a date-part against key strings
 type DateTest struct {
 	matcherTest
-	fieldIndex // RFC 5260 §6
 
 	Header       string   // Header field to extract date from
 	DatePart     DatePart // Part of date to compare
 	Zone         string   // Time zone offset (e.g., "+0500")
 	OriginalZone bool     // Use original zone from header
+	Index        int      // Index for multiple headers (from "index" extension)
+	Last         bool     // Use last header instead of first (from "index" extension)
 }
 
 func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	header := expandVars(rd, d.Header)
 
-	byName, err := d.selectFields([]string{header}, rd.Msg.HeaderGet)
+	index := fieldIndex{Index: d.Index, Last: d.Last}
+	byName, err := index.selectFields([]string{header}, rd.Msg.HeaderGet)
 	if err != nil {
 		return false, err
 	}
