@@ -126,6 +126,30 @@ func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 		return nil
 	}
 
+	// RFC 5293 §5 matches the value-patterns "as if by the "header" test",
+	// and with :count that test compares the number of fields, not a value:
+	// "The Header Test counts the total number of instances of the specified
+	// fields." (RFC 5231 §4.2). So the count is of every field, or of the
+	// one :index selects, and when it matches they are all deleted.
+	if c.isCount() {
+		n := len(values)
+		if c.Index > 0 {
+			if c.Index > n {
+				return nil // Index out of range, nothing to delete
+			}
+			n = 1
+		}
+		if c.countMatches(d, uint64(n)) {
+			d.HeaderEdits = append(d.HeaderEdits, HeaderEdit{
+				Action:    "delete",
+				FieldName: fieldName,
+				Index:     c.Index,
+				Last:      c.Last,
+			})
+		}
+		return nil
+	}
+
 	// If :index is specified, only check that specific occurrence
 	if c.Index > 0 {
 		idx := c.Index - 1 // Convert to 0-based
