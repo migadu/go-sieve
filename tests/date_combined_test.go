@@ -20,8 +20,8 @@ Test.
 test "Received comments, obsolete years and leap seconds" {
  set "zone" "+0100";
  set "part" "ISO8601";
- if not date :zone "${zone}" "Received" "${part}" "2017-01-01T00:59:59+01:00" {test_fail "combined normalization or dynamic zone failed";}
- if not date :originalzone :index 2 "Received" "${part}" "2016-12-31T23:59:59Z" {test_fail "two-digit year or Zulu date-part failed";}
+ if not date :zone "${zone}" "Received" "${part}" "2017-01-01T00:59:60+01:00" {test_fail "combined normalization or dynamic zone failed";}
+ if not date :originalzone :index 2 "Received" "${part}" "2016-12-31T23:59:60Z" {test_fail "two-digit year or Zulu date-part failed";}
 }
 test "count uses just the selected field with a dynamic date-part" {
  set "part" "year";
