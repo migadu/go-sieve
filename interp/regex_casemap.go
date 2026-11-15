@@ -6,6 +6,7 @@ import (
 	"regexp/syntax"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -40,22 +41,17 @@ func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimi
 	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits}, nil
 }
 
-// foldASCIICase rewrites pattern, parsed as parsed, so that each ASCII letter
-// in it also matches its other case, and only ASCII letters do: Go's (?i)
-// folds every letter, and k and s with the Kelvin sign and the long s.
-//
-// A negated bracket expression is folded in the pattern text, before the
-// parser negates it: as with REG_ICASE, [^a] then matches neither a nor A,
-// where folding the parsed class, which holds A, would make it match both.
-// Everything else is folded in the parsed expression: a literal letter becomes
-// a class of its two cases, and a class gets the other case of each letter.
-// That includes a class an escape negates itself, such as \P{Lu} or
-// [[:^upper:]]: Go extensions to the POSIX ERE syntax the regex draft
-// specifies, folded after their negation.
+// foldASCIICase folds ASCII letters without changing non-ASCII membership.
+// Source classes must be handled before the parser discards how each member
+// was negated: fold a positive member, then negate it, union the members, and
+// finally apply the bracket's own negation. Literal letters outside classes
+// are folded in the parsed expression as before.
 func foldASCIICase(pattern string, parsed *syntax.Regexp) (string, error) {
-	folded := foldNegatedBrackets(pattern)
+	folded, err := foldASCIIClassSources(pattern)
+	if err != nil {
+		return "", err
+	}
 	if folded != pattern {
-		var err error
 		if parsed, err = syntax.Parse(folded, syntax.Perl); err != nil {
 			return "", err
 		}
@@ -66,57 +62,228 @@ func foldASCIICase(pattern string, parsed *syntax.Regexp) (string, error) {
 	return parsed.String(), nil
 }
 
-// foldNegatedBrackets adds to each negated bracket expression in pattern the
-// other case of each ASCII letter it lists, or returns pattern if none lacks
-// one. It finds the brackets as regexp/syntax does with syntax.Perl: outside a
-// bracket, nothing after a backslash or between \Q and \E opens one, and
-// bracketEnd finds where one closes. The caller has parsed pattern, so every
-// bracket is closed.
-func foldNegatedBrackets(pattern string) string {
+// foldASCIIClassSources replaces each class with its ASCII-folded set. An
+// explicit (?i) requests Go's Unicode folding, so classes in that scope are
+// left to Go. A (?-i) scope still has the comparator's baseline ASCII folding.
+// The input has already been parsed, so group syntax and escapes are valid.
+func foldASCIIClassSources(pattern string) (string, error) {
 	var b strings.Builder
 	done := 0
+	unicodeFold := false
+	var scopes []bool
 	for i := 0; i < len(pattern); {
+		start, end := i, i
 		switch pattern[i] {
+		case '(':
+			if strings.HasPrefix(pattern[i:], "(?") && !strings.HasPrefix(pattern[i:], "(?P<") && !strings.HasPrefix(pattern[i:], "(?<") {
+				j, nextFold, negative := i+2, unicodeFold, false
+				for pattern[j] != ':' && pattern[j] != ')' {
+					switch pattern[j] {
+					case '-':
+						negative = true
+					case 'i':
+						nextFold = !negative
+					}
+					j++
+				}
+				if pattern[j] == ':' {
+					scopes = append(scopes, unicodeFold)
+				}
+				unicodeFold = nextFold
+				i = j + 1
+				continue
+			}
+			scopes = append(scopes, unicodeFold)
+			i++
+		case ')':
+			unicodeFold = scopes[len(scopes)-1]
+			scopes = scopes[:len(scopes)-1]
+			i++
 		case '\\':
 			if strings.HasPrefix(pattern[i:], `\Q`) {
 				end := strings.Index(pattern[i+2:], `\E`)
 				if end < 0 {
 					i = len(pattern)
-					continue
+				} else {
+					i += 2 + end + 2
 				}
-				i += 2 + end + 2
 				continue
 			}
-			i += 2
+			n, class := bracketMember(pattern[i:])
+			i += n
+			if class && !unicodeFold {
+				end = i
+			}
 		case '[':
-			end := bracketEnd(pattern, i)
-			if end < 0 {
-				i = len(pattern)
-				continue
+			i = bracketEnd(pattern, i) + 1
+			if !unicodeFold {
+				end = i
 			}
-			if pattern[i+1] == '^' {
-				body := pattern[i+2 : end]
-				if other := otherCaseLetters(body); other != "" {
-					b.WriteString(pattern[done : i+2])
-					b.WriteString(other)
-					// The added letters come first: escape a first "]",
-					// "-" or "^" that was a member only because it was first.
-					if body[0] == ']' || body[0] == '-' || body[0] == '^' {
-						b.WriteByte('\\')
-					}
-					done = i + 2
-				}
-			}
-			i = end + 1
 		default:
 			i++
 		}
+		if end > start {
+			replacement, err := foldASCIIClassSource(pattern[start:end])
+			if err != nil {
+				return "", err
+			}
+			b.WriteString(pattern[done:start])
+			b.WriteString(replacement)
+			done = end
+		}
 	}
 	if done == 0 {
-		return pattern
+		return pattern, nil
 	}
 	b.WriteString(pattern[done:])
-	return b.String()
+	return b.String(), nil
+}
+
+type asciiClass [128]bool
+
+// foldASCIIClassSource retains the original class's non-ASCII ranges and
+// replaces just its ASCII membership. This avoids Unicode SimpleFold adding
+// K/k from a Kelvin-sign member, or S/s from a long-s member.
+func foldASCIIClassSource(source string) (string, error) {
+	original, err := syntax.Parse(source, syntax.Perl)
+	if err != nil {
+		return "", err
+	}
+	var ascii asciiClass
+	if source[0] != '[' {
+		ascii, err = foldedASCIIMember(source)
+	} else {
+		i, negate := 1, false
+		if source[i] == '^' {
+			i, negate = i+1, true
+		}
+		for first := true; source[i] != ']' || first; first = false {
+			start := i
+			namedEnd := -1
+			if strings.HasPrefix(source[i:], "[:") {
+				namedEnd = strings.Index(source[i+2:], ":]")
+			}
+			if namedEnd >= 0 {
+				i += 2 + namedEnd + 2
+			} else {
+				n, class := bracketMember(source[i:])
+				i += n
+				if !class && source[i] == '-' && source[i+1] != ']' {
+					n, _ = bracketMember(source[i+1:])
+					i += 1 + n
+				}
+			}
+			member, memberErr := foldedASCIIMember(source[start:i])
+			if memberErr != nil {
+				return "", memberErr
+			}
+			for r := range ascii {
+				ascii[r] = ascii[r] || member[r]
+			}
+		}
+		if negate {
+			for r := range ascii {
+				ascii[r] = !ascii[r]
+			}
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	ranges := make([]rune, 0, 2*len(ascii))
+	for r := 0; r < len(ascii); {
+		if !ascii[r] {
+			r++
+			continue
+		}
+		lo := r
+		for r+1 < len(ascii) && ascii[r+1] {
+			r++
+		}
+		ranges = append(ranges, rune(lo), rune(r))
+		r++
+	}
+	for i, originalRanges := 0, classRanges(original); i+1 < len(originalRanges); i += 2 {
+		lo, hi := originalRanges[i], originalRanges[i+1]
+		if hi < 128 {
+			continue
+		}
+		if lo < 128 {
+			lo = 128
+		}
+		if n := len(ranges); n > 0 && lo <= ranges[n-1]+1 {
+			if hi > ranges[n-1] {
+				ranges[n-1] = hi
+			}
+		} else {
+			ranges = append(ranges, lo, hi)
+		}
+	}
+	return (&syntax.Regexp{Op: syntax.OpCharClass, Rune: ranges}).String(), nil
+}
+
+// foldedASCIIMember closes a positive member under ASCII case before applying
+// its own inverse. A source bracket can union these sets before negating them.
+func foldedASCIIMember(source string) (asciiClass, error) {
+	negate := false
+	switch {
+	case strings.HasPrefix(source, "[:^"):
+		negate, source = true, "[:"+source[3:]
+	case strings.HasPrefix(source, `\p`) || strings.HasPrefix(source, `\P`):
+		negate = source[1] == 'P'
+		source = `\p` + source[2:]
+		if strings.HasPrefix(source, `\p{^`) {
+			negate, source = !negate, `\p{`+source[4:]
+		}
+	case source == `\D` || source == `\S` || source == `\W`:
+		negate, source = true, strings.ToLower(source)
+	}
+	if source[0] == '^' {
+		source = `\` + source
+	}
+	parsed, err := syntax.Parse("["+source+"]", syntax.Perl)
+	if err != nil {
+		return asciiClass{}, err
+	}
+	ranges := classRanges(parsed)
+	var ascii asciiClass
+	for r := range ascii {
+		other := rune(r)
+		if isASCIILetter(other) {
+			other ^= 0x20
+		}
+		ascii[r] = inRanges(ranges, rune(r)) || inRanges(ranges, other)
+		if negate {
+			ascii[r] = !ascii[r]
+		}
+	}
+	return ascii, nil
+}
+
+// classRanges returns the rune set of a parsed single-character class. The
+// parser can simplify full/empty classes or a complete SimpleFold cycle into
+// special operators; expanding that cycle here preserves its original set.
+func classRanges(re *syntax.Regexp) []rune {
+	switch re.Op {
+	case syntax.OpCharClass:
+		return re.Rune
+	case syntax.OpAnyChar:
+		return []rune{0, unicode.MaxRune}
+	case syntax.OpAnyCharNotNL:
+		return []rune{0, '\n' - 1, '\n' + 1, unicode.MaxRune}
+	case syntax.OpLiteral:
+		r := re.Rune[0]
+		ranges := []rune{r, r}
+		if re.Flags&syntax.FoldCase != 0 {
+			for other := unicode.SimpleFold(r); other != r; other = unicode.SimpleFold(other) {
+				ranges = append(ranges, other, other)
+			}
+			sort.Slice(ranges, func(i, j int) bool { return ranges[i] < ranges[j] })
+		}
+		return ranges
+	default:
+		return nil
+	}
 }
 
 // bracketEnd returns the index of the "]" that closes the bracket expression
@@ -193,41 +360,6 @@ func braced(s string) int {
 		return end + 1
 	}
 	return len(s)
-}
-
-// otherCaseLetters returns the ASCII letters that the members of a bracket
-// expression, body, lack while they hold the letter's other case.
-func otherCaseLetters(body string) string {
-	if body[0] == '^' {
-		body = `\` + body // a member here, not a negation
-	}
-	re, err := syntax.Parse("["+body+"]", syntax.Perl)
-	if err != nil {
-		return ""
-	}
-	// The parser makes a bracket of one member, or of the two cases of one
-	// letter (FoldCase), a literal, and one of every character "." (OpAnyChar,
-	// OpAnyCharNotNL), which holds both cases of every letter.
-	var ranges []rune
-	switch {
-	case re.Op == syntax.OpCharClass:
-		ranges = re.Rune
-	case re.Op == syntax.OpLiteral && re.Flags&syntax.FoldCase == 0:
-		ranges = []rune{re.Rune[0], re.Rune[0]}
-	default:
-		return ""
-	}
-	var other []byte
-	for upper := rune('A'); upper <= 'Z'; upper++ {
-		lower := upper | 0x20
-		hasUpper, hasLower := inRanges(ranges, upper), inRanges(ranges, lower)
-		if hasUpper && !hasLower {
-			other = append(other, byte(lower))
-		} else if hasLower && !hasUpper {
-			other = append(other, byte(upper))
-		}
-	}
-	return string(other)
 }
 
 // inRanges reports whether r is in the class ranges (lo-hi pairs).

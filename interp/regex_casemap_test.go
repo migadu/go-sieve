@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -114,5 +115,83 @@ func TestRegexASCIICaseMapPatternLimits(t *testing.T) {
 		if _, _, err := testString(context.Background(), ComparatorASCIICaseMap, MatchRegex, "", "a", key); err == nil {
 			t.Errorf("key %q: no error", key)
 		}
+	}
+}
+
+// Inverse members and outer bracket negation must agree. Test all ASCII
+// inputs, then compare non-ASCII inputs with the source's original set.
+func TestRegexASCIICaseMapInverseMembers(t *testing.T) {
+	letter := func(r rune) bool { return 'A' <= r && r <= 'Z' || 'a' <= r && r <= 'z' }
+	nonletter := func(r rune) bool { return !letter(r) }
+	cases := []struct {
+		patterns []string
+		ascii    func(rune) bool
+	}{
+		{[]string{`\P{Lu}`, `\p{^Lu}`, `[\P{Lu}]`, `[^\p{Lu}]`, `[[:^upper:]]`, `[^[:upper:]]`, `\P{Ll}`, `[[:^lower:]]`}, nonletter},
+		{[]string{`\P{^Lu}`, `[^\P{Lu}]`, `[^\p{^Lu}]`, `[^[:^upper:]]`, `[^\P{Ll}]`, `[^[:^lower:]]`}, letter},
+		{[]string{`[a\P{Lu}]`, `[a[:^upper:]]`}, func(r rune) bool { return !letter(r) || r == 'a' || r == 'A' }},
+		{[]string{`[^a\P{Lu}]`, `[^a[:^upper:]]`}, func(r rune) bool { return letter(r) && r != 'a' && r != 'A' }},
+		{[]string{`\p{Any}`, `[^\P{Any}]`, `[\p{Lu}\P{Lu}]`}, func(r rune) bool { return true }},
+		{[]string{`\P{Any}`, `[^\p{Any}]`, `[^\p{Lu}\P{Lu}]`}, func(r rune) bool { return false }},
+	}
+	for _, tc := range cases {
+		for _, source := range tc.patterns {
+			for _, pattern := range []string{source, `(?-i:` + source + `)`} {
+				t.Run(pattern, func(t *testing.T) {
+					matcher, err := compileSafeRegexFor(`^(`+pattern+`)$`, ComparatorASCIICaseMap, DefaultRegexLimits)
+					if err != nil {
+						t.Fatal(err)
+					}
+					original := regexp.MustCompile(`^(` + pattern + `)$`)
+					inputs := []rune("ÉéÜüKſßİıΩωΣςσАа😀")
+					for r := rune(0); r < 128; r++ {
+						inputs = append(inputs, r)
+					}
+					for _, r := range inputs {
+						input := string(r)
+						want := original.MatchString(input)
+						if r < 128 {
+							want = tc.ascii(r)
+						}
+						got, err := matcher.FindSubmatch(context.Background(), input)
+						if err != nil || (got != nil) != want {
+							t.Fatalf("%U: captures %q, err %v; want match %v", r, got, err, want)
+						}
+						if got != nil && !reflect.DeepEqual(got, []string{input, input}) {
+							t.Fatalf("%U: captures %q, want original input", r, got)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRegexASCIICaseMapClassScopes(t *testing.T) {
+	cases := []struct {
+		pattern, value string
+		want           []string
+	}{
+		{`(?i)([^\P{Lu}])(?-i)(\P{Lu})`, "Éé", []string{"Éé", "É", "é"}},
+		{`(?i)([^\P{Lu}])(?-i)(\P{Lu})`, "éÉ", nil},
+		{`(?i:(\P{Lu}))(\P{Lu})`, "_a", nil},
+		{`(?i:(\P{Lu}))(\P{Lu})`, "_é", []string{"_é", "_", "é"}},
+		{`(?i:(\P{Lu}))(?i:(\P{Lu}))`, "_é", nil},
+		{`\Q(?i)\E(\P{Lu})`, "(?i)a", nil},
+		{`\Q[\P{Lu}]\E(\P{Lu})`, `[\p{lu}]_`, []string{`[\p{lu}]_`, "_"}},
+		{`[[:a-z]`, "B", []string{"B"}},
+		{`[^[:a-z]`, "B", nil},
+		{`[KkK]`, "K", []string{"K"}},
+		{`[Kk]`, "K", nil},
+		{`[Ssſ]`, "ſ", []string{"ſ"}},
+		{`[Ss]`, "ſ", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.pattern+"/"+tc.value, func(t *testing.T) {
+			_, got, err := testString(context.Background(), ComparatorASCIICaseMap, MatchRegex, "", tc.value, `^(?:`+tc.pattern+`)$`)
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("captures %q, err %v; want %q", got, err, tc.want)
+			}
+		})
 	}
 }
