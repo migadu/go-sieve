@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/textproto"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -78,6 +79,33 @@ func TestRegexKeyRefusedAtLoad(t *testing.T) {
 		if _, err := loadWithRegexKeyExtensions(script); err != nil {
 			t.Errorf("%s: %v", script, err)
 		}
+	}
+}
+
+// A :regex key is checked, not compiled, when the script loads. Counted
+// repetition makes a key of MaxPatternLength bytes, such as "(?:a...a){1000}",
+// compile to a program of some 45 MB in some 40 ms, so compiling and keeping
+// every key of a script under ManageSieve's 16 KB limit made each load (each
+// PUTSCRIPT, each script compiled for delivery) take half a second and hold
+// close to 700 MB for as long as the script was kept.
+func TestRegexKeyCheckAtLoadDoesNotCompile(t *testing.T) {
+	key := `"(?:` + strings.Repeat("a", 990) + `){1000}"`
+	keys := make([]string, 15)
+	for i := range keys {
+		keys[i] = key
+	}
+	script := `require "regex"; if header :regex "Subject" [` + strings.Join(keys, ", ") + `] { stop; }`
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	loaded, err := loadWithRegexKeyExtensions(script)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.KeepAlive(loaded)
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 16<<20 {
+		t.Fatalf("loading a %d-byte script allocated %d MB, want under 16 MB", len(script), allocated>>20)
 	}
 }
 
