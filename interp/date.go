@@ -510,8 +510,8 @@ func (c CurrentDateTest) Check(ctx context.Context, rd *RuntimeData) (bool, erro
 		return c.countMatches(rd, 1), nil
 	}
 
-	// The current time, in the :zone or the local zone
-	t := time.Now().In(zoneLocation(rd, c.Zone))
+	// The current time of this execution, in the :zone or the local zone
+	t := rd.now().In(zoneLocation(rd, c.Zone))
 
 	// Extract the date part
 	partValue, err := extractDatePart(t, datePart)
