@@ -200,6 +200,11 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 			if lastTag != nil && lastTag.NeedsValue {
 				return lexer.ErrorAt(a, "LoadSpec: tagged argument requires a value")
 			}
+			// RFC 5228 §2.6.2: "Tagged arguments must appear before
+			// positional arguments".
+			if nextPosArg > 0 {
+				return lexer.ErrorAt(a, "LoadSpec: tagged argument :%s after positional arguments", a.Value)
+			}
 			tag, ok := spec.Tags[strings.ToLower(a.Value)]
 			if !ok {
 				return lexer.ErrorAt(a, "LoadSpec: unknown tagged argument: %v", a.Value)

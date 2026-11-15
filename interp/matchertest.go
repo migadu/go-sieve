@@ -125,6 +125,14 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 	default:
 		return fmt.Errorf("unsupported comparator: %v", t.comparator)
 	}
+	// RFC 5228 §2.7.3: "Comparators other than "i;octet" and
+	// "i;ascii-casemap" must be declared with require [...] If the
+	// comparator is not declared with require, it is also an error, even
+	// if the comparator is supported."
+	if t.comparator != ComparatorOctet && t.comparator != ComparatorASCIICaseMap &&
+		!s.RequiresExtension("comparator-"+string(t.comparator)) {
+		return fmt.Errorf("missing require 'comparator-%s'", t.comparator)
+	}
 
 	if t.match == MatchMatches {
 		t.keyCompiled = make([]CompiledMatcher, len(t.key))
