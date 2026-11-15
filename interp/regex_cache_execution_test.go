@@ -7,7 +7,6 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -223,29 +222,24 @@ func TestRegexCacheExecutionContextLimits(t *testing.T) {
 	if _, _, err := matchRegex(cancelled, &cache, ComparatorASCIICaseMap, pattern, "abcdef"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cached matcher ignored cancellation: %v", err)
 	}
-	// Block the cached engine deterministically, independent of host speed.
-	// A watchdog also releases it if the timeout wrapper regresses.
+	// Make the cached engine start reading after its deadline, independent
+	// of host speed. The synchronous reader must report the stopped match.
 	find := matcher.find
-	release, done := make(chan struct{}), make(chan struct{})
-	var releaseOnce sync.Once
-	releaseWorker := func() { releaseOnce.Do(func() { close(release) }) }
-	watchdog := time.AfterFunc(time.Second, releaseWorker)
-	matcher.find = func(value string) []string {
-		defer close(done)
-		<-release
-		return find(value)
-	}
-	defer func() {
-		watchdog.Stop()
-		releaseWorker()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("cached engine did not finish after release")
+	matcher.find = func(value string, in *deadlineReader) []string {
+		if in == nil {
+			t.Error("large cached match did not use its deadline reader")
+			return find(value, in)
 		}
-	}()
+		select {
+		case <-in.done:
+		case <-time.After(time.Second):
+			t.Error("cached match's deadline did not close")
+		}
+		return find(value, in)
+	}
+	defer func() { matcher.find = find }()
 	ctx = ContextWithRegexLimits(context.Background(), RegexLimits{MaxInputLength: 4096, MaxExecTime: time.Millisecond})
 	if _, _, err := matchRegex(ctx, &cache, ComparatorASCIICaseMap, pattern, strings.Repeat("a", 2048)); !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("cached matcher ignored context soft timeout: %v", err)
+		t.Errorf("cached matcher ignored context deadline: %v", err)
 	}
 }
