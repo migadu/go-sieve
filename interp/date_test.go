@@ -190,6 +190,10 @@ func TestParseDateHeaderReceivedSeparators(t *testing.T) {
 		"from mx by local; " + date + " (PDT;)",
 		`from "mx;host" by local; ` + date + " (summer; time)",
 		`from "mx\";host" by local; ` + date,
+		`from [a(] by local; ` + date,
+		`from [a"] by local; ` + date,
+		`from [a;b] by local; ` + date,
+		`from [a\]("] by local; ` + date,
 		`from mx (a \) ; nested (b;c)) by local; ` + date,
 		`from mx by local; ` + date + ` (a \) ; b)`,
 		`from mx by local; ` + date + ` (a \(; b)`,
@@ -205,6 +209,7 @@ func TestParseDateHeaderReceivedSeparators(t *testing.T) {
 		"from mx by local; " + date + " (unterminated; comment",
 		"from mx (unterminated; " + date,
 		`from "unterminated; ` + date,
+		`from [unterminated; ` + date,
 		"from mx by local; " + date + " (comment); ",
 	} {
 		if got, err := parseDateHeader(value); err == nil {

@@ -235,15 +235,16 @@ func parseDateHeader(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
 }
 
-// lastDateSeparator returns the last semicolon outside comments and quoted
-// strings. Both may contain quoted-pairs, and comments may nest. The suffix
-// after a separator is parsed as a complete date-time, including trailing CFWS.
+// lastDateSeparator returns the last semicolon outside comments, quoted
+// strings and domain-literals (the tokens of a Received field, RFC 5322
+// section 3.6.7). Each may contain quoted-pairs; comments may also nest. The
+// suffix is parsed as a complete date-time, including trailing CFWS.
 func lastDateSeparator(value string) int {
 	last, depth := -1, 0
-	quoted := false
+	quoted, literal := false, false
 	for i := 0; i < len(value); i++ {
 		c := value[i]
-		if c == '\\' && (quoted || depth > 0) {
+		if c == '\\' && (quoted || literal || depth > 0) {
 			i++ // a quoted-pair cannot open or close either construct
 			continue
 		}
@@ -262,11 +263,20 @@ func lastDateSeparator(value string) int {
 			}
 			continue
 		}
+		if literal {
+			if c == ']' {
+				literal = false
+			}
+			continue
+		}
+
 		switch c {
 		case '(':
 			depth = 1
 		case '"':
 			quoted = true
+		case '[':
+			literal = true
 		case ';':
 			last = i
 		}
