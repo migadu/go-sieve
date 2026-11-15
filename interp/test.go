@@ -78,7 +78,10 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	}
 	names := make([]string, 0, len(a.Header))
 	for _, hdr := range a.Header {
-		name := expandVars(d, strings.ToLower(hdr))
+		// Lowered after expansion, so a variable's value is folded too: header
+		// names compare under i;ascii-casemap (RFC 5228 §2.7.3), which folds
+		// only US-ASCII letters (RFC 4790 §9.2).
+		name := toLowerASCII(expandVars(d, hdr))
 		// A header that is not an address header is skipped: it neither
 		// matches (not even the empty string) nor counts for :index. RFC 5703
 		// §4.2: any MIME header of the parts in scope is parsed as an address
