@@ -106,7 +106,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, false)
 		case MatchRegex:
-			return matchRegex(ctx, comparator, key, value)
+			return matchRegex(ctx, nil, comparator, key, value)
 		case MatchValue:
 			return rel.CompareString(value, key), nil, nil
 		case MatchCount:
@@ -144,7 +144,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, true)
 		case MatchRegex:
-			return matchRegex(ctx, comparator, key, value)
+			return matchRegex(ctx, nil, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -163,7 +163,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchUnicode(ctx, key, value, true)
 		case MatchRegex:
-			return matchRegex(ctx, comparator, key, value)
+			return matchRegex(ctx, nil, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -271,30 +271,67 @@ func toLowerASCII(s string) string {
 	return b.String()
 }
 
-// compileRegex compiles a :regex key for comparator through the bounded
-// executor; capture groups retain the value's own text. setKey only checks the
-// raw key (checkRegex), without keeping its program; matchRegex compiles it
-// when its test runs. The comparator folds the pattern rather than the value.
-func compileRegex(pattern string, comparator Comparator) (CompiledMatcher, error) {
+// matchRegex matches value against the :regex key pattern under comparator
+// and returns the capture groups, which hold the value's own text whatever the
+// comparator. setKey only checks a key (checkRegex); it is compiled when its
+// test runs, through regexes, which keeps it for the next value, or each time
+// when regexes is nil.
+func matchRegex(ctx context.Context, regexes *regexCache, comparator Comparator, pattern, value string) (bool, []string, error) {
+	matcher, err := regexes.compile(pattern, comparator)
+	if err != nil {
+		return false, nil, err
+	}
+	matches, err := matcher.FindSubmatch(ctx, value)
+	if err != nil {
+		return false, nil, err
+	}
+	return matches != nil, matches, nil
+}
+
+// regexCacheMaxKeys and regexCacheMaxSize bound the :regex keys one execution
+// keeps compiled: the keys' programs come to at most 100000 instructions
+// together (some 5 MB; see RegexLimits.MaxProgramSize), which holds ten keys
+// of the largest size, and to at most 1000 keys (a compiled key keeps 1-2 KB
+// besides its program).
+const (
+	regexCacheMaxKeys = 1000
+	regexCacheMaxSize = 100000
+)
+
+type regexCacheKey struct {
+	comparator Comparator
+	pattern    string
+}
+
+// regexCache keeps the :regex keys an execution has compiled, so that a key
+// is compiled once, not again for every value its test matches it against or
+// for every test with the same key. Pigeonhole likewise compiles a key once
+// per match operation and reuses it for every value (mcht_regex_match_keys).
+// A key past regexCacheMaxKeys or regexCacheMaxSize is compiled each time it
+// is matched.
+type regexCache struct {
+	matchers map[regexCacheKey]*SafeRegexMatcher
+	size     int
+}
+
+func (c *regexCache) compile(pattern string, comparator Comparator) (*SafeRegexMatcher, error) {
+	if c == nil {
+		return compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
+	}
+	key := regexCacheKey{comparator: comparator, pattern: pattern}
+	if matcher, ok := c.matchers[key]; ok {
+		return matcher, nil
+	}
 	matcher, err := compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	if err != nil {
 		return nil, err
 	}
-
-	return func(ctx context.Context, value string) (bool, []string, error) {
-		matches, err := matcher.FindSubmatch(ctx, value)
-		if err != nil {
-			return false, nil, err
+	if len(c.matchers) < regexCacheMaxKeys && c.size+matcher.size <= regexCacheMaxSize {
+		if c.matchers == nil {
+			c.matchers = make(map[regexCacheKey]*SafeRegexMatcher)
 		}
-		return matches != nil, matches, nil
-	}, nil
-}
-
-// matchRegex matches value against a :regex key known only when the test runs.
-func matchRegex(ctx context.Context, comparator Comparator, pattern, value string) (bool, []string, error) {
-	matcher, err := compileRegex(pattern, comparator)
-	if err != nil {
-		return false, nil, err
+		c.matchers[key] = matcher
+		c.size += matcher.size
 	}
-	return matcher(ctx, value)
+	return matcher, nil
 }
