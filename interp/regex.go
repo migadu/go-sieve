@@ -101,14 +101,15 @@ type SafeRegexMatcher struct {
 	limits  RegexLimits
 	// size is the estimated size of the compiled program, in instructions
 	// (programSize); 0 for the binaryregexp :matches path.
-	size int
+	size       int
+	cacheBytes int // conservative retained cache charge; no parsed tree is kept
 }
 
 // CompileSafeRegex compiles a pattern with the stdlib regexp engine
 // (Unicode-aware) and applies the supplied safety limits. Used for the :regex
 // match type and the Unicode :matches path.
 func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, error) {
-	_, size, err := parseSafeRegex(pattern, limits)
+	parsed, size, err := parseSafeRegex(pattern, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +117,7 @@ func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, er
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size}, nil
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheCost(pattern, pattern, parsed)}, nil
 }
 
 // checkRegex returns the error CompileSafeRegex returns for pattern under

@@ -32,11 +32,17 @@ func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimi
 			return nil, fmt.Errorf("regex compile error: %w", err)
 		}
 	}
+	// Charge the transformed expression, whose classes and text can be much
+	// larger than the original key. Parse only; do not compile a second program.
+	storage, err := syntax.Parse(expr, syntax.Perl)
+	if err != nil {
+		return nil, fmt.Errorf("regex compile error: %w", err)
+	}
 	re, err := regexp.Compile(expr)
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size}, nil
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheCost(expr, pattern, storage)}, nil
 }
 
 // foldASCIICase folds ASCII letters without changing non-ASCII membership.

@@ -116,16 +116,25 @@ func TestRegexCacheBounded(t *testing.T) {
 		t.Error("the key under another comparator is the same matcher")
 	}
 
-	// Each key compiles to 9000 instructions, so eleven fit.
+	// The instruction budget fits eleven of these keys; the independent
+	// byte budget can admit fewer.
+	initialSize, initialBytes := c.size, c.bytes
 	var last string
+	var largeBytes int
 	for i := 0; i < 20; i++ {
 		last = fmt.Sprintf("(?:k%03dabcde){1000}", i)
-		if _, err := c.compile(last, ComparatorOctet); err != nil {
+		matcher, err := c.compile(last, ComparatorOctet)
+		if err != nil {
 			t.Fatal(err)
 		}
+		largeBytes = matcher.cacheBytes
 	}
-	if c.size > regexCacheMaxSize || len(c.matchers) != 2+regexCacheMaxSize/9000 {
-		t.Errorf("keeps %d keys of %d instructions", len(c.matchers), c.size)
+	fit := (regexCacheMaxSize - initialSize) / 9000
+	if byBytes := (regexCacheMaxBytes - initialBytes) / largeBytes; byBytes < fit {
+		fit = byBytes
+	}
+	if c.size > regexCacheMaxSize || c.bytes > regexCacheMaxBytes || len(c.matchers) != 2+fit {
+		t.Errorf("keeps %d keys of %d instructions in %d charged bytes", len(c.matchers), c.size, c.bytes)
 	}
 	a, _ := c.compile(last, ComparatorOctet)
 	b, _ := c.compile(last, ComparatorOctet)

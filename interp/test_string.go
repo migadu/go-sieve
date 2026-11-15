@@ -288,11 +288,9 @@ func matchRegex(ctx context.Context, regexes *regexCache, comparator Comparator,
 	return matches != nil, matches, nil
 }
 
-// regexCacheMaxKeys and regexCacheMaxSize bound the :regex keys one execution
-// keeps compiled: the keys' programs come to at most 100000 instructions
-// together (some 5 MB; see RegexLimits.MaxProgramSize), which holds ten keys
-// of the largest size, and to at most 1000 keys (a compiled key keeps 1-2 KB
-// besides its program).
+// Cache admission caps key count, weighted program size, and the conservative
+// retained-byte charge. Program instructions alone omit Unicode rune arrays,
+// one-pass lookahead copies and transformed expression strings.
 const (
 	regexCacheMaxKeys = 1000
 	regexCacheMaxSize = 100000
@@ -307,31 +305,49 @@ type regexCacheKey struct {
 // is compiled once, not again for every value its test matches it against or
 // for every test with the same key. Pigeonhole likewise compiles a key once
 // per match operation and reuses it for every value (mcht_regex_match_keys).
-// A key past regexCacheMaxKeys or regexCacheMaxSize is compiled each time it
+// A key past a count, program-size or retained-byte budget is compiled each time it
 // is matched.
 type regexCache struct {
 	matchers map[regexCacheKey]*SafeRegexMatcher
 	size     int
+	bytes    int
 }
 
 func (c *regexCache) compile(pattern string, comparator Comparator) (*SafeRegexMatcher, error) {
 	if c == nil {
 		return compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	}
+	// Reject oversized text before hashing or cloning it. Only supported,
+	// bounded comparator names become owned cache keys.
+	if len(pattern) > DefaultRegexLimits.MaxPatternLength {
+		return compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
+	}
+	switch comparator {
+	case ComparatorOctet, ComparatorASCIICaseMap, ComparatorUnicodeCaseMap:
+	default:
+		return compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
+	}
 	key := regexCacheKey{comparator: comparator, pattern: pattern}
 	if matcher, ok := c.matchers[key]; ok {
 		return matcher, nil
 	}
+	// Own bounded copies before compiling: a short substring may otherwise
+	// keep an arbitrarily large source buffer alive through regexp.expr or
+	// the map key. Captured input values are never stored in the cache.
+	pattern = strings.Clone(pattern)
+	key.pattern = pattern
+	key.comparator = Comparator(strings.Clone(string(comparator)))
 	matcher, err := compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	if err != nil {
 		return nil, err
 	}
-	if len(c.matchers) < regexCacheMaxKeys && c.size+matcher.size <= regexCacheMaxSize {
+	if len(c.matchers) < regexCacheMaxKeys && c.size+matcher.size <= regexCacheMaxSize && matcher.cacheBytes <= regexCacheMaxBytes-c.bytes {
 		if c.matchers == nil {
 			c.matchers = make(map[regexCacheKey]*SafeRegexMatcher)
 		}
 		c.matchers[key] = matcher
 		c.size += matcher.size
+		c.bytes += matcher.cacheBytes
 	}
 	return matcher, nil
 }
