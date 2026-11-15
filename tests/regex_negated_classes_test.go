@@ -35,6 +35,8 @@ func TestRegexNegatedClasses(t *testing.T) {
 		{name: "property caret excludes lower", pattern: `^(\p{^Lu})$`, value: "a"},
 		{name: "two property inversions include lower", pattern: `^(\P{^Lu})$`, value: "a", match: true},
 		{name: "outer property caret includes lower", pattern: `^([^\p{^Lu}])$`, value: "a", match: true},
+		{name: "inverse universal property stays empty", pattern: `^(\P{Any})$`, value: "A"},
+		{name: "double inverse universal property matches", pattern: `^([^\P{Any}])$`, value: "A", match: true},
 		{name: "inverse POSIX upper excludes upper", pattern: `^([[:^upper:]])$`, value: "A"},
 		{name: "inverse POSIX upper excludes lower", pattern: `^([[:^upper:]])$`, value: "a"},
 		{name: "inverse POSIX lower excludes upper", pattern: `^([[:^lower:]])$`, value: "A"},
