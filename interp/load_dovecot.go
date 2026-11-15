@@ -1,14 +1,35 @@
 package interp
 
 import (
-	"fmt"
-
+	"github.com/migadu/go-sieve/lexer"
 	"github.com/migadu/go-sieve/parser"
 )
 
-func loadDovecotTestSet(s *Script, pcmd parser.Cmd) (Cmd, error) {
+// requireDovecotTestsuite refuses a vnd.dovecot.testsuite command or test
+// unless the script required the extension, which loadRequire allows only in
+// a testing environment. RFC 5228 section 2.10.5: "If an extension is not
+// enabled with "require", implementations MUST treat it as if they did not
+// support it at all."
+func requireDovecotTestsuite(s *Script, pos lexer.Position, name string) error {
 	if !s.RequiresExtension(DovecotTestExtension) || s.opts.T == nil {
-		return nil, fmt.Errorf("testing environment is not enabled")
+		return parser.ErrorAt(pos, "%s: missing require '%s'", name, DovecotTestExtension)
+	}
+	return nil
+}
+
+// loadDovecotNoop loads a testsuite command that go-sieve has nothing to do
+// for, such as test_binary_save (no binary form) or test_config_reload
+// (test_config_set applies at once).
+func loadDovecotNoop(s *Script, pcmd parser.Cmd) (Cmd, error) {
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
+	}
+	return CmdNoop{}, nil
+}
+
+func loadDovecotTestSet(s *Script, pcmd parser.Cmd) (Cmd, error) {
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
 	}
 	cmd := CmdDovecotTestSet{}
 	err := LoadSpec(s, &Spec{
@@ -38,8 +59,8 @@ func loadDovecotTestSet(s *Script, pcmd parser.Cmd) (Cmd, error) {
 }
 
 func loadDovecotTestFail(s *Script, pcmd parser.Cmd) (Cmd, error) {
-	if !s.RequiresExtension(DovecotTestExtension) || s.opts.T == nil {
-		return nil, fmt.Errorf("testing environment is not enabled")
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
 	}
 	cmd := CmdDovecotTestFail{}
 	err := LoadSpec(s, &Spec{
@@ -66,8 +87,8 @@ func loadDovecotTestFail(s *Script, pcmd parser.Cmd) (Cmd, error) {
 }
 
 func loadDovecotTest(s *Script, pcmd parser.Cmd) (Cmd, error) {
-	if !s.RequiresExtension(DovecotTestExtension) || s.opts.T == nil {
-		return nil, fmt.Errorf("testing environment is not enabled")
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
 	}
 	cmd := CmdDovecotTest{}
 	err := LoadSpec(s, &Spec{
@@ -88,6 +109,9 @@ func loadDovecotTest(s *Script, pcmd parser.Cmd) (Cmd, error) {
 }
 
 func loadDovecotCompile(s *Script, test parser.Test) (Test, error) {
+	if err := requireDovecotTestsuite(s, test.Position, test.Id); err != nil {
+		return nil, err
+	}
 	loaded := TestDovecotCompile{}
 	err := LoadSpec(s, &Spec{
 		Pos: []SpecPosArg{
@@ -104,6 +128,9 @@ func loadDovecotCompile(s *Script, test parser.Test) (Test, error) {
 }
 
 func loadDovecotConfigSet(s *Script, pcmd parser.Cmd) (Cmd, error) {
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
+	}
 	loaded := CmdDovecotConfigSet{}
 	err := LoadSpec(s, &Spec{
 		Pos: []SpecPosArg{
@@ -127,6 +154,9 @@ func loadDovecotConfigSet(s *Script, pcmd parser.Cmd) (Cmd, error) {
 }
 
 func loadDovecotConfigUnset(s *Script, pcmd parser.Cmd) (Cmd, error) {
+	if err := requireDovecotTestsuite(s, pcmd.Position, pcmd.Id); err != nil {
+		return nil, err
+	}
 	loaded := CmdDovecotConfigSet{
 		Unset: true,
 	}
@@ -139,25 +169,24 @@ func loadDovecotConfigUnset(s *Script, pcmd parser.Cmd) (Cmd, error) {
 				MinStrCount: 1,
 				MaxStrCount: 1,
 			},
-			{
-				MatchStr: func(val []string) {
-					loaded.Value = val[0]
-				},
-				MinStrCount: 1,
-				MaxStrCount: 1,
-			},
 		},
 	}, pcmd.Position, pcmd.Args, pcmd.Tests, pcmd.Block)
 	return loaded, err
 }
 
 func loadDovecotRun(s *Script, test parser.Test) (Test, error) {
+	if err := requireDovecotTestsuite(s, test.Position, test.Id); err != nil {
+		return nil, err
+	}
 	loaded := TestDovecotRun{}
 	err := LoadSpec(s, &Spec{}, test.Position, test.Args, test.Tests, nil)
 	return loaded, err
 }
 
 func loadDovecotError(s *Script, test parser.Test) (Test, error) {
+	if err := requireDovecotTestsuite(s, test.Position, test.Id); err != nil {
+		return nil, err
+	}
 	loaded := TestDovecotTestError{matcherTest: newMatcherTest()}
 	err := LoadSpec(s, loaded.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
