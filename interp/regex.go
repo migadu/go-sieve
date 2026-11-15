@@ -25,7 +25,8 @@ type RegexLimits struct {
 	// before it is compiled. Counted repetition multiplies what it repeats,
 	// so without this bound a pattern of MaxPatternLength bytes can compile
 	// to about a million instructions (some 45 MB). A compiled instruction
-	// keeps about 50 bytes.
+	// keeps about 50 bytes, and a character class counts one instruction
+	// more for every 8 range ends it holds (see programSize).
 	MaxProgramSize int
 	// MaxInputLength is the maximum input length fed to the matcher. Longer
 	// input is truncated to this length before matching (safe degradation,
@@ -145,6 +146,18 @@ func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, er
 		maxSize = DefaultRegexLimits.MaxProgramSize
 	}
 	size := programSize(re)
+	if size <= maxSize {
+		// The casemap comparators compile the pattern case-insensitive,
+		// which adds the other case of each letter to a class: [A-Z] holds
+		// 2 range ends, folded 8, and a range of Latin-1 and Latin
+		// Extended-A letters folds to some 50. The bound is checked on both,
+		// so that it is the same under every comparator.
+		if folded, err := syntax.Parse(pattern, syntax.Perl|syntax.FoldCase); err == nil {
+			if foldedSize := programSize(folded); foldedSize > size {
+				size = foldedSize
+			}
+		}
+	}
 	if size > maxSize {
 		return nil, 0, fmt.Errorf("regex too complex: compiles to about %d instructions > %d", size, maxSize)
 	}
@@ -157,11 +170,20 @@ func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, er
 // repeats. The parser refuses repetition nested to more than 1000 copies of
 // what it repeats, and a tree deeper than 1000, so neither the size nor the
 // recursion can grow out of bounds.
+//
+// It also counts what a character class keeps, which regexp/syntax does not:
+// regexp compiles a program of under 1000 instructions that is anchored at
+// both ends to a one-pass program as well, which copies the class into every
+// instruction that matches it, some 6 bytes per range end. So a class counts
+// one instruction more for every 8 range ends: \pL holds 1318, and ^\pL{990}$
+// keeps some 8 MB, as much as 160000 instructions do.
 func programSize(re *syntax.Regexp) int {
 	size := 0
 	switch re.Op {
 	case syntax.OpLiteral:
 		size = len(re.Rune)
+	case syntax.OpCharClass:
+		size = 1 + len(re.Rune)/8
 	case syntax.OpCapture, syntax.OpStar:
 		size = 2 + programSize(re.Sub[0])
 	case syntax.OpPlus, syntax.OpQuest:
