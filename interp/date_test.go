@@ -115,3 +115,55 @@ func TestParseDateHeaderPreservesParserExtensions(t *testing.T) {
 		}
 	}
 }
+
+// A time-of-day whose second is 60, a leap second, is a date-time: RFC 5322
+// section 3.3 has "the time-of-day MUST be in the range 00:00:00 through
+// 23:59:60 (the number of seconds allowing for a leap second ...)".
+// time.Time cannot hold second 60, so it is read as second 59 of the same
+// minute, as Dovecot's message_date_parse does. net/mail.ParseDate does not
+// parse it at all.
+func TestParseDateHeaderLeapSecond(t *testing.T) {
+	const h = 3600
+	leap := time.Date(2016, 12, 31, 23, 59, 59, 0, time.UTC) // 2016-12-31T23:59:60Z, as second 59
+	cases := []struct {
+		value  string
+		want   time.Time
+		offset int // seconds east of UTC
+	}{
+		{"Sat, 31 Dec 2016 23:59:60 +0000", leap, 0},
+		{"Sun, 1 Jan 2017 00:59:60 +0100", leap, h},
+		{"Sat, 31 Dec 2016 15:59:60 -0800", leap, -8 * h},
+		{"Sat, 31 Dec 2016 23:59:60 GMT", leap, 0},
+		{"Sat, 31 Dec 2016 23:59:60 UT (leap second)", leap, 0},
+		{"Sat, 31 Dec 2016 15:59:60 PST", leap, -8 * h},
+		{"Sat, 31 Dec 2016 23:59:60 GMT+0000", leap, 0},
+		{"31 Dec 2016 23:59:60 +0000", leap, 0},
+		{"Sat, 31 Dec 2016 23:59:60\r\n +0000", leap, 0},
+		{"Tue, 30 Jun 2015 23:59:60 +0000", time.Date(2015, 6, 30, 23, 59, 59, 0, time.UTC), 0},
+	}
+	for _, tc := range cases {
+		got, err := parseDateHeader(tc.value)
+		if err != nil {
+			t.Errorf("%q: %v", tc.value, err)
+			continue
+		}
+		if !got.Equal(tc.want) {
+			t.Errorf("%q: %v, want %v", tc.value, got, tc.want.In(time.FixedZone("", tc.offset)))
+		}
+		if _, offset := got.Zone(); offset != tc.offset {
+			t.Errorf("%q: zone offset of %v is %d, want %d", tc.value, got, offset, tc.offset)
+		}
+	}
+
+	// Only a second of 60 is a leap second.
+	for _, value := range []string{
+		"Sat, 31 Dec 2016 23:59:61 +0000",
+		"Sat, 31 Dec 2016 23:59:600 +0000",
+		"Sat, 31 Dec 2016 23:60:00 +0000",
+		"Sat, 31 Dec 2016 24:00:00 +0000",
+	} {
+		if got, err := parseDateHeader(value); err == nil {
+			t.Errorf("%q parsed as %v", value, got)
+		}
+	}
+}
