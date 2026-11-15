@@ -272,26 +272,18 @@ func toLowerASCII(s string) string {
 }
 
 // compileRegex compiles a :regex key for comparator through the bounded
-// executor; the matcher returns the match result and the capture groups. The
-// casemap comparators match the pattern, as written, against the value
-// lowercased. setKey compiles a key without variables once, when the script
-// loads, and matchRegex any other key when its test runs, so both match alike.
+// executor; the matcher returns the match result and the capture groups,
+// which hold the value's own text whatever the comparator. setKey compiles a
+// key without variables once, when the script loads, and matchRegex any other
+// key when its test runs, so both match alike.
 func compileRegex(pattern string, comparator Comparator) (CompiledMatcher, error) {
-	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
+	matcher, err := compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	if err != nil {
 		return nil, err
 	}
 
-	fold := func(value string) string { return value }
-	switch comparator {
-	case ComparatorASCIICaseMap:
-		fold = toLowerASCII
-	case ComparatorUnicodeCaseMap:
-		fold = strings.ToLower
-	}
-
 	return func(ctx context.Context, value string) (bool, []string, error) {
-		matches, err := matcher.FindSubmatch(ctx, fold(value))
+		matches, err := matcher.FindSubmatch(ctx, value)
 		if err != nil {
 			return false, nil, err
 		}
