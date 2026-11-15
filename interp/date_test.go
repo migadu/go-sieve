@@ -167,3 +167,33 @@ func TestParseDateHeaderLeapSecond(t *testing.T) {
 		}
 	}
 }
+
+// The iso8601 date-part writes a zero offset as "Z", whatever zone has it (RFC
+// 5260 §4.2: "a time zone offset of zero MUST be represented by "Z" and not
+// "+00:00""), and any other offset as "+hh:mm" or "-hh:mm" (RFC 3339 §5.6).
+func TestExtractDatePartISO8601(t *testing.T) {
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Fatal(err)
+	}
+	utc := time.Date(1996, 1, 17, 2, 23, 25, 0, time.UTC)
+	for _, tc := range []struct {
+		loc  *time.Location
+		want string
+	}{
+		{time.UTC, "1996-01-17T02:23:25Z"},
+		{time.FixedZone("", 0), "1996-01-17T02:23:25Z"},
+		{time.FixedZone("GMT", 0), "1996-01-17T02:23:25Z"},
+		{london, "1996-01-17T02:23:25Z"}, // GMT in January
+		{time.FixedZone("", 2*3600), "1996-01-17T04:23:25+02:00"},
+		{time.FixedZone("", -(5*3600 + 30*60)), "1996-01-16T20:53:25-05:30"},
+	} {
+		got, err := extractDatePart(utc.In(tc.loc), DatePartISO8601)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.loc, err)
+		}
+		if got != tc.want {
+			t.Errorf("%v: iso8601 = %q, want %q", tc.loc, got, tc.want)
+		}
+	}
+}
