@@ -279,11 +279,6 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 		return nil, err
 	}
 
-	// Check if regex extension is required
-	if loaded.match == MatchRegex && !s.RequiresExtension("regex") {
-		return nil, fmt.Errorf("missing require 'regex'")
-	}
-
 	return loaded, nil
 }
 

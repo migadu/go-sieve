@@ -93,11 +93,18 @@ func (t *matcherTest) addSpecTags(s *Spec) *Spec {
 
 // checkOptions refuses comparator and match-type options that are wrong in
 // themselves, whatever they are matched against: more than one match type,
-// :count or :value without relational or with an unknown operator, and a
-// comparator that is unknown or that the script does not require.
+// :regex without regex, :count or :value without relational or with an
+// unknown operator, and a comparator that is unknown or that the script does
+// not require.
 func (t *matcherTest) checkOptions(s *Script) error {
 	if t.matchCnt > 1 {
 		return fmt.Errorf("multiple match-types are not allowed")
+	}
+
+	// RFC 5228 §2.10.5: "If an extension is not enabled with "require",
+	// implementations MUST treat it as if they did not support it at all."
+	if t.match == MatchRegex && !s.RequiresExtension("regex") {
+		return fmt.Errorf("missing require 'regex'")
 	}
 
 	if t.match == MatchCount || t.match == MatchValue {
