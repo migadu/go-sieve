@@ -38,7 +38,7 @@ func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimi
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits}, nil
+	return &SafeRegexMatcher{find: regexpFindSubmatch(re), pattern: pattern, limits: limits}, nil
 }
 
 // foldASCIICase folds ASCII letters without changing non-ASCII membership.
