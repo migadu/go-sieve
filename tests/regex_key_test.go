@@ -130,10 +130,10 @@ func runRegexKeyScript(t *testing.T, script, message string) []string {
 	return data.Mailboxes
 }
 
-// A :regex key compiled when the script loads matches as the same key does
+// A :regex key checked when the script loads matches as the same key does
 // when it is known only at run time, through a variable: the same result and
 // the same match variables, under every comparator :regex runs with.
-func TestRegexKeyCompiledAtLoadMatchesAsAtRunTime(t *testing.T) {
+func TestRegexKeyCheckedAtLoadMatchesAsAtRunTime(t *testing.T) {
 	const message = "Subject: I have a Present for you\r\n\r\nBody.\r\n"
 
 	const octet = `require ["fileinto", "variables", "regex"]; if header :regex :comparator "i;octet" "Subject" "^I have a (.*) for you$" { fileinto "hit-${1}"; }`
@@ -154,7 +154,7 @@ if header :regex :comparator %q "Subject" "${p}" { fileinto "hit-${1}"; }`, patt
 			atLoad := runRegexKeyScript(t, constant, message)
 			atRun := runRegexKeyScript(t, variable, message)
 			if !reflect.DeepEqual(atLoad, atRun) {
-				t.Errorf("%s %q: compiled at load filed into %q, at run time into %q", comparator, pattern, atLoad, atRun)
+				t.Errorf("%s %q: the constant key filed into %q, the key through a variable into %q", comparator, pattern, atLoad, atRun)
 			}
 		}
 	}

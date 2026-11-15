@@ -31,3 +31,25 @@ func TestRegexKeyCheckedAtLoadNotKept(t *testing.T) {
 		t.Fatalf("setKey: %v, want a malformed pattern error", err)
 	}
 }
+
+// checkRegex refuses a key at load exactly when CompileSafeRegex would refuse
+// it at every run, with the same error.
+func TestCheckRegexAgreesWithCompileSafeRegex(t *testing.T) {
+	patterns := []string{
+		"", "^a(b)$", `\d+`, "(?i)abc", "(?P<n>a)", "[[:alpha:]]+", `\<`,
+		"(?:" + strings.Repeat("a", 990) + "){1000}",
+		strings.Repeat("a", DefaultRegexLimits.MaxPatternLength),
+		strings.Repeat("a", DefaultRegexLimits.MaxPatternLength+1),
+		"(", "[z-a]", "a{2,1}", "a**", "a{1001}", "(a{1000}){2}", `\8`, `x\Ky`,
+		"[[:foo:]]", "\xff", strings.Repeat("(", 500),
+		"sirius(+\\+.*)?@friep\\.example\\.com",
+		"sirius(\\+.*)?@friep\\.ex[]ample.com",
+	}
+	for _, pattern := range patterns {
+		checkErr := checkRegex(pattern, DefaultRegexLimits)
+		_, compileErr := CompileSafeRegex(pattern, DefaultRegexLimits)
+		if (checkErr == nil) != (compileErr == nil) || (checkErr != nil && checkErr.Error() != compileErr.Error()) {
+			t.Errorf("%.40q: checkRegex: %v, CompileSafeRegex: %v", pattern, checkErr, compileErr)
+		}
+	}
+}
