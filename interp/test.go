@@ -79,7 +79,7 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	names := make([]string, 0, len(a.Header))
 	for _, hdr := range a.Header {
 		// Lowered after expansion, so a variable's value is folded too: header
-		// names compare under i;ascii-casemap (RFC 5228 §2.7.3), which folds
+		// names compare under i;ascii-casemap (RFC 5228 §2.7), which folds
 		// only US-ASCII letters (RFC 4790 §9.2).
 		name := toLowerASCII(expandVars(d, hdr))
 		// A header that is not an address header is skipped: it neither
