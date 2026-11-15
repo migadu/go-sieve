@@ -166,6 +166,7 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 
 	refused := []string{
 		`^\pL{990}$`,
+		strings.Repeat(`[02KS\x80-\x{17e}\x{180}-\x{2129}\x{212b}-\x{10ffff}]{999}`, 4),
 		`^[\pL\pN]{100}$`,
 		"^" + strings.Repeat(`\pL`, 330) + "$",
 	}
@@ -235,6 +236,7 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 // case of each letter to a class ([A-Z] holds 2 range ends, folded 8).
 func TestRegexProgramSizeCountsClasses(t *testing.T) {
 	patterns := []string{
+		`[02KS\x80-\x{17e}\x{180}-\x{2129}\x{212b}-\x{10ffff}]{999}`,
 		`^\pL{60}$`,
 		`[\pL\pN]{2,50}`,
 		`\p{Lu}{50}`,
