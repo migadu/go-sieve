@@ -231,7 +231,8 @@ func applyHeaderEditsToValues(d *RuntimeData, fieldName string, values []string)
 	copy(result, values)
 
 	for _, edit := range d.HeaderEdits {
-		if !strings.EqualFold(edit.FieldName, fieldName) {
+		// Header names compare under i;ascii-casemap (RFC 5228 §2.7).
+		if !equalFoldASCII(edit.FieldName, fieldName) {
 			continue
 		}
 
@@ -272,6 +273,29 @@ func applyHeaderEditsToValues(d *RuntimeData, fieldName string, values []string)
 	}
 
 	return result
+}
+
+// equalFoldASCII reports whether a and b are equal under i;ascii-casemap,
+// which folds US-ASCII letters only: "letters outside ASCII are not treated
+// case-insensitively" (RFC 4790 §9.2.1). strings.EqualFold would also fold
+// U+212A KELVIN SIGN to "k" and U+017F LATIN SMALL LETTER LONG S to "s".
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		ca, cb := a[i], b[i]
+		if 'A' <= ca && ca <= 'Z' {
+			ca += 'a' - 'A'
+		}
+		if 'A' <= cb && cb <= 'Z' {
+			cb += 'a' - 'A'
+		}
+		if ca != cb {
+			return false
+		}
+	}
+	return true
 }
 
 // GetHeaderWithEdits retrieves header values with edits applied
