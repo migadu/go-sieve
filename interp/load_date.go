@@ -24,6 +24,7 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 
 	var key []string
 	var zoneCnt int
+	var index fieldIndex
 
 	spec := loaded.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
@@ -66,7 +67,7 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 			},
 		},
 	})
-	loaded.addIndexTags(spec.Tags)
+	index.addIndexTags(spec.Tags)
 
 	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
@@ -90,9 +91,10 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 		return nil, fmt.Errorf("date: invalid date-part: %s", loaded.DatePart)
 	}
 
-	if err := loaded.validateIndex(s, test.Position); err != nil {
+	if err := index.validateIndex(s, test.Position); err != nil {
 		return nil, err
 	}
+	loaded.Index, loaded.Last = index.Index, index.Last
 
 	if err := loaded.setKey(s, key); err != nil {
 		return nil, err
