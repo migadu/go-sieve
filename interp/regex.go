@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"time"
 
 	"rsc.io/binaryregexp"
@@ -100,6 +101,21 @@ func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, er
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
 	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits}, nil
+}
+
+// checkRegex returns the error CompileSafeRegex returns for pattern under
+// limits, without compiling it. regexp.Compile refuses only what
+// syntax.Parse refuses with the Perl flags, and parsing does not expand
+// counted repetition, so the check stays cheap for a key whose compiled
+// program would be large.
+func checkRegex(pattern string, limits RegexLimits) error {
+	if len(pattern) > limits.MaxPatternLength {
+		return fmt.Errorf("regex pattern too long: %d > %d", len(pattern), limits.MaxPatternLength)
+	}
+	if _, err := syntax.Parse(pattern, syntax.Perl); err != nil {
+		return fmt.Errorf("regex compile error: %w", err)
+	}
+	return nil
 }
 
 // compileSafeBinaryRegex compiles a pattern with the binaryregexp engine

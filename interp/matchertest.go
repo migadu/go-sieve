@@ -155,13 +155,10 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 		caseFold = true
 	}
 
-	// A pattern without variables is compiled once, here, so one that does
-	// not compile refuses the script instead of failing its test at every
-	// message. draft-murchison-sieve-regex §3: "Implementations SHOULD reject
-	// regular expressions that are unsupported by this specification as a
-	// syntax error." i;ascii-numeric has no :regex; testString refuses that
-	// pair when the test runs.
-	if t.match == MatchMatches || (t.match == MatchRegex && t.comparator != ComparatorASCIINumeric) {
+	// A :matches pattern without variables is compiled once, here, so one
+	// that does not compile refuses the script instead of failing its test at
+	// every message.
+	if t.match == MatchMatches {
 		t.keyCompiled = make([]CompiledMatcher, len(t.key))
 		for i := range t.key {
 			if len(usedVars(s, t.key[i])) > 0 {
@@ -169,13 +166,28 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 			}
 
 			var err error
-			if t.match == MatchMatches {
-				t.keyCompiled[i], err = compileMatcher(t.key[i], octet, caseFold)
-			} else {
-				t.keyCompiled[i], err = compileRegex(t.key[i], t.comparator)
-			}
+			t.keyCompiled[i], err = compileMatcher(t.key[i], octet, caseFold)
 			if err != nil {
 				return fmt.Errorf("malformed pattern (%v): %v", t.key[i], err)
+			}
+		}
+	}
+
+	// A :regex key without variables is checked here, so one that does not
+	// compile refuses the script instead of failing its test at every
+	// message. draft-murchison-sieve-regex §3: "Implementations SHOULD reject
+	// regular expressions that are unsupported by this specification as a
+	// syntax error." The key is only checked, as Pigeonhole does, and the
+	// test compiles it when it runs: counted repetition makes a key of
+	// MaxPatternLength bytes compile to tens of megabytes, so compiling and
+	// keeping every key would let one script hold hundreds.
+	if t.match == MatchRegex {
+		for _, key := range t.key {
+			if len(usedVars(s, key)) > 0 {
+				continue
+			}
+			if err := checkRegex(key, DefaultRegexLimits); err != nil {
+				return fmt.Errorf("malformed pattern (%v): %v", key, err)
 			}
 		}
 	}

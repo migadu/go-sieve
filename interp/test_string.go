@@ -273,9 +273,9 @@ func toLowerASCII(s string) string {
 
 // compileRegex compiles a :regex key for comparator through the bounded
 // executor; the matcher returns the match result and the capture groups,
-// which hold the value's own text whatever the comparator. setKey compiles a
-// key without variables once, when the script loads, and matchRegex any other
-// key when its test runs, so both match alike.
+// which hold the value's own text whatever the comparator. setKey only checks
+// a key (checkRegex); matchRegex compiles it when its test runs.
+
 func compileRegex(pattern string, comparator Comparator) (CompiledMatcher, error) {
 	matcher, err := compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	if err != nil {
