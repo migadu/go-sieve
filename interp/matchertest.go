@@ -155,7 +155,13 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 		caseFold = true
 	}
 
-	if t.match == MatchMatches {
+	// A pattern without variables is compiled once, here, so one that does
+	// not compile refuses the script instead of failing its test at every
+	// message. draft-murchison-sieve-regex §3: "Implementations SHOULD reject
+	// regular expressions that are unsupported by this specification as a
+	// syntax error." i;ascii-numeric has no :regex; testString refuses that
+	// pair when the test runs.
+	if t.match == MatchMatches || (t.match == MatchRegex && t.comparator != ComparatorASCIINumeric) {
 		t.keyCompiled = make([]CompiledMatcher, len(t.key))
 		for i := range t.key {
 			if len(usedVars(s, t.key[i])) > 0 {
@@ -163,7 +169,11 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 			}
 
 			var err error
-			t.keyCompiled[i], err = compileMatcher(t.key[i], octet, caseFold)
+			if t.match == MatchMatches {
+				t.keyCompiled[i], err = compileMatcher(t.key[i], octet, caseFold)
+			} else {
+				t.keyCompiled[i], err = compileRegex(t.key[i], t.comparator)
+			}
 			if err != nil {
 				return fmt.Errorf("malformed pattern (%v): %v", t.key[i], err)
 			}
