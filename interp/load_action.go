@@ -2,6 +2,7 @@ package interp
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/migadu/go-sieve/lexer"
@@ -286,6 +287,11 @@ func (a *flagArgs) split(s *Script, pos lexer.Position, action bool) (variables,
 		usable, gettable := s.IsVarUsable(name)
 		if !action {
 			usable = gettable
+			// RFC 5229 section 3.2: decimal names are readable match
+			// variables, even though they cannot be assigned to.
+			if n, err := strconv.Atoi(name); err == nil && n >= 0 && name[0] >= '0' && name[0] <= '9' {
+				usable = true
+			}
 		}
 		if !usable {
 			return nil, nil, parser.ErrorAt(pos, "%q is not a usable variable name", name)

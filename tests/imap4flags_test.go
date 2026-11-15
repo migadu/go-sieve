@@ -205,6 +205,9 @@ func TestImap4flagsLoadErrors(t *testing.T) {
 		{"hasflag :count needs relational", `require "imap4flags"; if hasflag :count "eq" "1" { stop; }`, `require 'relational'`},
 		{"variable name list", `require ["imap4flags", "variables"]; addflag ["a", "b"] "\\Seen";`, `variable name`},
 		{"invalid variable name", `require ["imap4flags", "variables"]; setflag "1x" "\\Seen";`, `variable`},
+		{"match variable is not settable", `require ["imap4flags", "variables"]; setflag "1" "Work";`, `variable`},
+		{"negative match variable is invalid", `require ["imap4flags", "variables"]; if hasflag "-1" "Work" { stop; }`, `variable`},
+		{"signed match variable is invalid", `require ["imap4flags", "variables"]; if hasflag "+1" "Work" { stop; }`, `variable`},
 		{"variable reference as a name", `require ["imap4flags", "variables"]; set "x" "y"; setflag "${x}" "\\Seen";`, `variable`},
 		{"envelope variable is not settable", `require ["imap4flags", "variables", "envelope"]; setflag "envelope.from" "\\Seen";`, `variable`},
 		{"invalid hasflag variable", `require ["imap4flags", "variables"]; if hasflag ["a", "b-c"] "\\Seen" { stop; }`, `variable`},
@@ -231,5 +234,29 @@ func TestImap4flagsLoadErrors(t *testing.T) {
 	script := `require ["imap4flags", "variables", "envelope"]; if hasflag "envelope.from" "x" { stop; }`
 	if _, err := sieve.Load(strings.NewReader(script), opts); err != nil {
 		t.Errorf("%s: %v", script, err)
+	}
+}
+
+// Match variables are readable variables too (RFC 5229 section 3.2).
+func TestImap4flagsHasflagMatchVariable(t *testing.T) {
+	for _, variable := range []string{`"0"`, `"1"`, `"01"`, `["Unset", "1"]`} {
+		t.Run(variable, func(t *testing.T) {
+			data := runImap4flags(t, `require ["imap4flags", "variables", "fileinto"];
+                if string :matches "Work Later" "*" {
+                    if hasflag `+variable+` "Later" { fileinto "Matched"; }
+                }`)
+			if want := []string{"Matched"}; !reflect.DeepEqual(data.Mailboxes, want) {
+				t.Errorf("mailboxes = %q, want %q", data.Mailboxes, want)
+			}
+		})
+	}
+}
+
+func TestImap4flagsHasflagUnsetMatchVariable(t *testing.T) {
+	data := runImap4flags(t, `require ["imap4flags", "variables", "fileinto", "relational", "comparator-i;ascii-numeric"];
+        if hasflag "1" "Work" { fileinto "Wrong"; }
+        if hasflag :count "eq" :comparator "i;ascii-numeric" ["0", "1"] "0" { fileinto "Matched"; }`)
+	if want := []string{"Matched"}; !reflect.DeepEqual(data.Mailboxes, want) {
+		t.Errorf("mailboxes = %q, want %q", data.Mailboxes, want)
 	}
 }

@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -149,6 +150,9 @@ func (c CmdRemoveFlag) Execute(_ context.Context, d *RuntimeData) error {
 func (d *RuntimeData) flagVar(name string) ([]string, error) {
 	if name == "" {
 		return d.Flags, nil
+	}
+	if n, err := strconv.Atoi(name); err == nil && n >= 0 {
+		return []string{d.MatchVariable(n)}, nil
 	}
 	value, err := d.Var(name)
 	if err != nil {

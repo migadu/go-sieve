@@ -367,14 +367,14 @@ func (h HasFlagTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		flags = distinctFlags(d.Flags)
 	} else {
 		for _, name := range h.Variables {
-			value, err := d.Var(name)
+			value, err := d.flagVar(name)
 			if err != nil {
 				return false, err
 			}
 			// "The :count of a variable returns the number of distinct flags
 			// in it.  The count of a list of variables is the sum of the
 			// counts of the member variables."
-			flags = append(flags, distinctFlags([]string{value})...)
+			flags = append(flags, distinctFlags(value)...)
 		}
 	}
 
