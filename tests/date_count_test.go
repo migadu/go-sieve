@@ -81,3 +81,23 @@ test "Missing field counts 0" {
 }
 `)
 }
+
+// RFC 5260 §5: "The :count value of a currentdate test is always 1." The
+// currentdate test handed :count to the string matcher, which panics on it.
+func TestCurrentDateCount(t *testing.T) {
+	RunDovecotTestInline(t, "", `
+require "vnd.dovecot.testsuite";
+require "date";
+require "relational";
+require "comparator-i;ascii-numeric";
+
+test "Count is 1" {
+	if not currentdate :count "eq" :comparator "i;ascii-numeric" "year" "1" {
+		test_fail "count of currentdate is not 1";
+	}
+	if currentdate :count "ne" :comparator "i;ascii-numeric" "date" "1" {
+		test_fail "count of currentdate is other than 1";
+	}
+}
+`)
+}
