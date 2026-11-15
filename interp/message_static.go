@@ -50,6 +50,9 @@ type MessageStatic struct {
 }
 
 func (m MessageStatic) HeaderGet(key string) ([]string, error) {
+	if m.Header == nil {
+		return nil, nil // a message without a header block
+	}
 	return m.Header.Values(key), nil
 }
 
