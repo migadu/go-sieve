@@ -85,14 +85,15 @@ func TestRegexKeyRefusedAtLoad(t *testing.T) {
 }
 
 // A :regex key is checked, not compiled, when the script loads. Counted
-// repetition makes a key of MaxPatternLength bytes, such as "(?:a...a){1000}",
-// compile to a program of some 45 MB in some 40 ms, so compiling and keeping
-// every key of a script under ManageSieve's 16 KB limit made each load (each
-// PUTSCRIPT, each script compiled for delivery) take half a second and hold
-// close to 700 MB for as long as the script was kept.
+// repetition makes a key of a few bytes, such as "(?:abcdefghi){1000}",
+// compile to a program of 9000 instructions, within MaxProgramSize, which
+// allocates some 1.7 MB and keeps some 0.4 MB, so compiling and keeping every
+// key of a script under ManageSieve's 16 KB limit would make each load (each
+// PUTSCRIPT, each script compiled for delivery) allocate over a gigabyte and
+// hold some 300 MB for as long as the script was kept.
 func TestRegexKeyCheckAtLoadDoesNotCompile(t *testing.T) {
-	key := `"(?:` + strings.Repeat("a", 990) + `){1000}"`
-	keys := make([]string, 15)
+	key := `"(?:abcdefghi){1000}"`
+	keys := make([]string, 40)
 	for i := range keys {
 		keys[i] = key
 	}
