@@ -100,7 +100,7 @@ func TestRegexProgramSizeEstimate(t *testing.T) {
 
 // regexCache compiles a key once per comparator, and keeps at most
 // regexCacheMaxKeys keys whose programs come to at most regexCacheMaxSize
-// instructions together; a key past either bound is compiled each time it is
+// instructions together, subject to the memory budget; a key past a bound is compiled each time it is
 // matched, and matches all the same.
 func TestRegexCacheBounded(t *testing.T) {
 	var c regexCache
@@ -115,7 +115,7 @@ func TestRegexCacheBounded(t *testing.T) {
 		t.Error("the key under another comparator is the same matcher")
 	}
 
-	// Each key compiles to 9000 instructions, so eleven fit.
+	// Each key compiles to 9000 instructions; the memory budget can bind first.
 	var last string
 	for i := 0; i < 20; i++ {
 		last = fmt.Sprintf("(?:k%03dabcde){1000}", i)
@@ -123,8 +123,8 @@ func TestRegexCacheBounded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if c.size > regexCacheMaxSize || len(c.matchers) != 2+regexCacheMaxSize/9000 {
-		t.Errorf("keeps %d keys of %d instructions", len(c.matchers), c.size)
+	if c.size > regexCacheMaxSize || c.bytes > regexCacheMaxBytes || len(c.matchers) < 3 || len(c.matchers) > 2+regexCacheMaxSize/9000 {
+		t.Errorf("keeps %d keys of %d instructions, charged %d bytes", len(c.matchers), c.size, c.bytes)
 	}
 	a, _ := c.compile(last, ComparatorOctet)
 	b, _ := c.compile(last, ComparatorOctet)

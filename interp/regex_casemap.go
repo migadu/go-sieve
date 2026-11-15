@@ -30,11 +30,17 @@ func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimi
 			return nil, fmt.Errorf("regex compile error: %w", err)
 		}
 	}
+	// Case folding may enlarge character classes without adding instructions.
+	// Account for the expression actually compiled when retaining its matcher.
+	folded, err := syntax.Parse(expr, syntax.Perl)
+	if err != nil {
+		return nil, fmt.Errorf("regex compile error: %w", err)
+	}
 	re, err := regexp.Compile(expr)
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size}, nil
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheBytes(folded, size, len(expr))}, nil
 }
 
 // foldASCIICase rewrites pattern, parsed as parsed, so that each ASCII letter
