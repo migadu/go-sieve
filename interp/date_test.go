@@ -33,7 +33,7 @@ func TestParseDateHeaderObsoleteZone(t *testing.T) {
 		{"Wed, 17 Jul 1996 02:23:25 Gmt", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 0},
 		{"Wed, 17 Jul 1996 02:23:25 PDT (Pacific Daylight Time)", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25\r\n PDT", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
-		{"Wed, 17 Jul 1996 02:23:25\r\n	PdT", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25\r\n\tPdT", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25PDT", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25 PDT(comment)", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"17 Jul 96 02:23 PDT", time.Date(1996, 7, 17, 2, 23, 0, 0, time.UTC), -7 * h},
@@ -131,7 +131,7 @@ func TestParseDateHeaderReceived(t *testing.T) {
 	}{
 		{"from mx.example.org by mail.example.com; Wed, 17 Jul 1996 02:23:25 -0700",
 			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
-		{"from mx.example.org (mx.example.org [192.0.2.1])\r\n	by mail.example.com (Postfix) with ESMTPS id 4ABC\r\n	for <user@example.com>; Wed, 17 Jul 1996 02:23:25 -0700 (PDT)",
+		{"from mx.example.org (mx.example.org [192.0.2.1])\r\n\tby mail.example.com (Postfix) with ESMTPS id 4ABC\r\n\tfor <user@example.com>; Wed, 17 Jul 1996 02:23:25 -0700 (PDT)",
 			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"from mx.example.org by mail.example.com;\r\n Wed, 17 Jul 1996 02:23:25 +0200",
 			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 2 * h},

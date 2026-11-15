@@ -146,7 +146,7 @@ var obsZones = map[string]string{
 // alphabeticZone matches a date-time (RFC 5322 §3.3) up to the end of its
 // time-of-day (the field's first colon is the one after the hour) and the run
 // of letters that follows it after any folding white space: the zone.
-var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ 	]*)([A-Za-z]+)`)
+var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za-z]+)`)
 
 // parseRFC5322Date parses an RFC 5322 date-time (§3.3) like net/mail.ParseDate,
 // but reads an alphabetic zone by RFC 5322 §4.3 instead of by the server's time
@@ -171,7 +171,7 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
 		// net/mail would discard the suffix after a numeric replacement. Keep
 		// its existing behavior for extensions it accepts, such as GMT+0000.
-		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '	' && unfolded[end] != '(' {
+		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
 			return mail.ParseDate(value)
 		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
