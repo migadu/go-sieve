@@ -450,8 +450,13 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	}
 	header := expandVars(rd, d.Header)
 
+	// The fields as editheader left them (RFC 5293 §7: tests "MUST examine
+	// the current state of a header as modified by any actions that have
+	// taken place so far").
 	index := fieldIndex{Index: d.Index, Last: d.Last}
-	byName, err := index.selectFields([]string{header}, rd.Msg.HeaderGet)
+	byName, err := index.selectFields([]string{header}, func(name string) ([]string, error) {
+		return GetHeaderWithEdits(rd, name)
+	})
 	if err != nil {
 		return false, err
 	}
