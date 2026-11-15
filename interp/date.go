@@ -148,6 +148,11 @@ var obsZones = map[string]string{
 // of letters that follows it after any folding white space: the zone.
 var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za-z]+)`)
 
+// leapSecond matches a date-time (RFC 5322 §3.3) up to the seconds of its
+// time-of-day (the field's first colon is the one after the hour) when they
+// are 60: a leap second.
+var leapSecond = regexp.MustCompile(`^[^:]*\d:\d{2}:(60)(?:\D|$)`)
+
 // parseRFC5322Date parses an RFC 5322 date-time (§3.3) like net/mail.ParseDate,
 // but reads an alphabetic zone by RFC 5322 §4.3 instead of by the server's time
 // zone.
@@ -159,6 +164,11 @@ var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za
 // names of §4.3 by their offsets, and the military zones and any other name by
 // "-0000", which §4.3 says they "SHOULD all be considered equivalent to"
 // without out-of-band information.
+//
+// A time-of-day whose second is 60, a leap second (§3.3: "the time-of-day MUST
+// be in the range 00:00:00 through 23:59:60"), is read as second 59 of the
+// same minute, as Dovecot reads it: time.Time cannot hold second 60, and
+// net/mail.ParseDate does not parse it.
 func parseRFC5322Date(value string) (time.Time, error) {
 	// Unfold exactly as net/mail does, without turning an unpaired CR or LF
 	// before the zone into valid white space during the replacement below.
@@ -166,13 +176,18 @@ func parseRFC5322Date(value string) (time.Time, error) {
 	if strings.ContainsAny(unfolded, "\r\n") {
 		return mail.ParseDate(value)
 	}
+	if m := leapSecond.FindStringSubmatchIndex(unfolded); m != nil {
+		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
+	}
 	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
 		end := m[5]
 		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
 		// net/mail would discard the suffix after a numeric replacement. Keep
-		// its existing behavior for extensions it accepts, such as GMT+0000.
+		// its existing behavior for extensions it accepts, such as GMT+0000
+		// (unfolded is the value net/mail would see, with a leap second read
+		// as second 59).
 		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
-			return mail.ParseDate(value)
+			return mail.ParseDate(unfolded)
 		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
 		if !ok {
