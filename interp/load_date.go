@@ -79,15 +79,14 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 		return nil, fmt.Errorf("date: cannot specify both :zone and :originalzone")
 	}
 
-	// Validate zone format if specified
-	if loaded.Zone != "" {
+	// A :zone and a date-part are checked here only when they hold no
+	// variable reference: the test expands one when it runs (RFC 5229 §3).
+	if loaded.Zone != "" && len(usedVars(s, loaded.Zone)) == 0 {
 		if _, err := parseZoneOffset(loaded.Zone); err != nil {
 			return nil, fmt.Errorf("date: %v", err)
 		}
 	}
-
-	// Validate date-part
-	if _, ok := ValidDateParts[loaded.DatePart]; !ok {
+	if _, ok := ValidDateParts[loaded.DatePart]; !ok && len(usedVars(s, string(loaded.DatePart))) == 0 {
 		return nil, fmt.Errorf("date: invalid date-part: %s", loaded.DatePart)
 	}
 
@@ -153,15 +152,14 @@ func loadCurrentDateTest(s *Script, test parser.Test) (Test, error) {
 		return nil, err
 	}
 
-	// Validate zone format if specified
-	if loaded.Zone != "" {
+	// A :zone and a date-part are checked here only when they hold no
+	// variable reference: the test expands one when it runs (RFC 5229 §3).
+	if loaded.Zone != "" && len(usedVars(s, loaded.Zone)) == 0 {
 		if _, err := parseZoneOffset(loaded.Zone); err != nil {
 			return nil, fmt.Errorf("currentdate: %v", err)
 		}
 	}
-
-	// Validate date-part
-	if _, ok := ValidDateParts[loaded.DatePart]; !ok {
+	if _, ok := ValidDateParts[loaded.DatePart]; !ok && len(usedVars(s, string(loaded.DatePart))) == 0 {
 		return nil, fmt.Errorf("currentdate: invalid date-part: %s", loaded.DatePart)
 	}
 
