@@ -75,6 +75,63 @@ func TestParseDateHeaderObsoleteZone(t *testing.T) {
 	}
 }
 
+// Comments and white space between the tokens of a date-time are read as
+// separators. RFC 5322 section 4.3: the obsolete syntax "permits comments and
+// folding white space between many of the tokens" (obs-day-of-week = [CFWS]
+// day-name [CFWS], obs-hour = [CFWS] 2DIGIT [CFWS], ...), and section 4: such
+// forms "MUST be accepted and parsed by a conformant receiver".
+// net/mail.ParseDate takes a comment only after the zone, and white space only
+// where its layouts have one space.
+func TestParseDateHeaderCFWS(t *testing.T) {
+	const h = 3600
+	wall := time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC)
+	cases := []struct {
+		value  string
+		offset int // seconds east of UTC
+	}{
+		{"Wed, 17 Jul 1996 02:23:25 (c) -0700", -7 * h},
+		{"Wed , 17 Jul 1996 02:23:25 -0700", -7 * h},
+		{"Wed, 17 Jul 1996 02 : 23 : 25 -0700", -7 * h},
+		{"(Wed) 17 Jul 1996 02:23:25 -0700", -7 * h},
+		{"Wed, 17 (July) Jul 1996 02:23:25 -0700", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 (Pacific) PDT", -7 * h},
+		{"Wed (Wednesday) , (the) 17 (th) Jul (of) 1996 (at) 02 (h) : (m) 23 (s) : 25 (z) -0700 (PDT)", -7 * h},
+		{"Wed, 17 Jul 1996 02(h):(m)23(s):25 -0700", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 PDT(Pacific)(Daylight Time)", -7 * h},
+		// Nested comments and quoted-pairs (RFC 5322 section 3.2.2).
+		{"Wed, 17 Jul 1996 02:23:25 (a (nested) \\) comment) -0700", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 (\\(c) PDT", -7 * h},
+		// A comment holding the characters the zone and the time are found by.
+		{"Wed, 17 Jul 1996 02:23:25 (UTC-7) PDT", -7 * h},
+		{"(Wed: 17 Jul) Wed, 17 Jul 1996 02:23:25 PDT", -7 * h},
+		// Folding white space: tabs, runs, a fold around a comment.
+		{"Wed,\t17\tJul\t1996\t02:23:25\t-0700", -7 * h},
+		{"Wed,   17  Jul   1996  02:23:25    PDT", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25\r\n (c)\r\n\t-0700", -7 * h},
+		// day = ([FWS] 1*2DIGIT FWS): the white space after the comma is optional.
+		{"Wed,17 Jul 1996 02:23:25 -0700", -7 * h},
+		{"Wed,(c)17 Jul 1996 02:23:25 +0530", 5*h + 30*60},
+		// obs-year = [CFWS] 2*DIGIT [CFWS].
+		{"Wed, 17 Jul (y) 96 (t) 02:23:25 PDT", -7 * h},
+		// A zone left to net/mail as written (an extension it accepts).
+		{"Wed , 17 Jul 1996 02:23:25 (c) GMT+0000", 0},
+	}
+	for _, tc := range cases {
+		got, err := parseDateHeader(tc.value)
+		if err != nil {
+			t.Errorf("%q: %v", tc.value, err)
+			continue
+		}
+		want := wall.Add(-time.Duration(tc.offset) * time.Second)
+		if !got.Equal(want) {
+			t.Errorf("%q: %v, want %v", tc.value, got, want.In(time.FixedZone("", tc.offset)))
+		}
+		if _, offset := got.Zone(); offset != tc.offset {
+			t.Errorf("%q: zone offset of %v is %d, want %d", tc.value, got, offset, tc.offset)
+		}
+	}
+}
+
 // A two- or three-digit year (obs-year) is read by RFC 5322 section 4.3: "If a
 // two digit year is encountered whose value is between 00 and 49, the year is
 // interpreted by adding 2000 ... If a two digit year is encountered with a
@@ -138,6 +195,23 @@ func TestParseDateHeaderInvalid(t *testing.T) {
 		"Wed, 17 Jul 1996 02:23:25 PDT-0700",
 		"Wed, 17 Jul 1996 02:23:25\r PDT",
 		"Wed, 17 Jul 1996 02:23:25\n PDT",
+		// A comment that does not close, and a zone that is only in a comment.
+		"Wed, 17 Jul 1996 02:23:25 -0700 (PDT",
+		"Wed, 17 Jul 1996 02:23:25 PDT (Pacific",
+		"Wed, 17 Jul 1996 02:23:25 (c -0700",
+		"Wed, 17 Jul 1996 02:23:25 -0700 (c\\)",
+		"Wed, 17 Jul 1996 02:23:25 (-0700)",
+		"Wed, 17 Jul 1996 02:23:25 (PDT)",
+		// Nor are letters a zone when a numeric offset follows them after
+		// white space or a comment: the RFC 5322 section 3.3 grammar has one
+		// zone after the time of day ("time = time-of-day zone"), and the
+		// offset after the letters would be discarded.
+		"Wed, 17 Jul 1996 02:23:25 PM -0700",
+		"Wed, 17 Jul 1996 02:23:25 PDT +0500",
+		"Wed, 17 Jul 1996 02:23:25 PDT\r\n +0500",
+		"Wed, 17 Jul 1996 02:23:25 Z\t-0700",
+		"Wed, 17 Jul 1996 02:23:25 PDT (c) +0500",
+		"Wed, 17 Jul 1996 02:23:25 (c) PM (c) -0700",
 		// year = 4*DIGIT / obs-year, and obs-year is 2*DIGIT (RFC 5322
 		// sections 3.3, 4.3).
 		"Mon, 17 Jul 5 02:23:25 +0000",
@@ -168,6 +242,36 @@ func TestParseDateHeaderPreservesParserExtensions(t *testing.T) {
 		_, gotOffset := got.Zone()
 		if !got.Equal(want) || gotOffset != wantOffset {
 			t.Errorf("%q: %v, want %v", value, got, want)
+		}
+	}
+}
+
+// The iso8601 date-part writes a zero offset as "Z", whatever zone has it (RFC
+// 5260 §4.2: "a time zone offset of zero MUST be represented by "Z" and not
+// "+00:00""), and any other offset as "+hh:mm" or "-hh:mm" (RFC 3339 §5.6).
+func TestExtractDatePartISO8601(t *testing.T) {
+	london, err := time.LoadLocation("Europe/London")
+	if err != nil {
+		t.Fatal(err)
+	}
+	utc := time.Date(1996, 1, 17, 2, 23, 25, 0, time.UTC)
+	for _, tc := range []struct {
+		loc  *time.Location
+		want string
+	}{
+		{time.UTC, "1996-01-17T02:23:25Z"},
+		{time.FixedZone("", 0), "1996-01-17T02:23:25Z"},
+		{time.FixedZone("GMT", 0), "1996-01-17T02:23:25Z"},
+		{london, "1996-01-17T02:23:25Z"}, // GMT in January
+		{time.FixedZone("", 2*3600), "1996-01-17T04:23:25+02:00"},
+		{time.FixedZone("", -(5*3600 + 30*60)), "1996-01-16T20:53:25-05:30"},
+	} {
+		got, err := extractDatePart(utc.In(tc.loc), DatePartISO8601)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.loc, err)
+		}
+		if got != tc.want {
+			t.Errorf("%v: iso8601 = %q, want %q", tc.loc, got, tc.want)
 		}
 	}
 }
