@@ -3,7 +3,6 @@ package tests
 import (
 	"context"
 	"net/textproto"
-	"slices"
 	"strings"
 	"testing"
 
@@ -179,8 +178,15 @@ func TestVacation(t *testing.T) {
 			if resp.Days != tc.expectedDays {
 				t.Errorf("Expected days %d, got %d", tc.expectedDays, resp.Days)
 			}
-			if !slices.Equal(resp.Addresses, tc.expectedAddresses) {
+			if len(resp.Addresses) != len(tc.expectedAddresses) {
 				t.Errorf("Expected addresses %q, got %q", tc.expectedAddresses, resp.Addresses)
+			} else {
+				for i, address := range resp.Addresses {
+					if address != tc.expectedAddresses[i] {
+						t.Errorf("Expected addresses %q, got %q", tc.expectedAddresses, resp.Addresses)
+						break
+					}
+				}
 			}
 		})
 	}
