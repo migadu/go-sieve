@@ -274,8 +274,8 @@ func toLowerASCII(s string) string {
 // compileRegex compiles a :regex key for comparator through the bounded
 // executor; the matcher returns the match result and the capture groups. The
 // casemap comparators match the pattern, as written, against the value
-// lowercased. setKey compiles a key without variables once, when the script
-// loads, and matchRegex any other key when its test runs, so both match alike.
+// lowercased. setKey only checks a key (checkRegex); matchRegex compiles it
+// when its test runs.
 func compileRegex(pattern string, comparator Comparator) (CompiledMatcher, error) {
 	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
 	if err != nil {
