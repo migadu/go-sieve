@@ -249,16 +249,17 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	}
 	values := byName[0]
 
-	// Handle :count match type
+	// RFC 5260 §4: "The count of a date test is 1 if the specified field
+	// exists and contains a valid date; 0, otherwise." The specified field
+	// is the first one, or the one :index selects, as below.
 	if d.isCount() {
-		// Count valid dates in the header values
-		validCount := uint64(0)
-		for _, value := range values {
-			if _, err := parseDateHeader(value); err == nil {
-				validCount++
+		count := uint64(0)
+		if len(values) > 0 {
+			if _, err := parseDateHeader(values[0]); err == nil {
+				count = 1
 			}
 		}
-		return d.countMatches(rd, validCount), nil
+		return d.countMatches(rd, count), nil
 	}
 
 	if len(values) == 0 {
