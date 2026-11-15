@@ -153,6 +153,13 @@ var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za
 // are 60: a leap second.
 var leapSecond = regexp.MustCompile(`^[^:]*\d:\d{2}:(60)(?:\D|$)`)
 
+// parsedHeaderDate keeps the RFC second outside time.Time, which cannot represent 60.
+// The time is clamped within the same minute for calendar and zone calculations.
+type parsedHeaderDate struct {
+	time.Time
+	leapSecond bool
+}
+
 // parseRFC5322Date parses an RFC 5322 date-time (§3.3) like net/mail.ParseDate,
 // but reads an alphabetic zone by RFC 5322 §4.3 instead of by the server's time
 // zone.
@@ -170,14 +177,22 @@ var leapSecond = regexp.MustCompile(`^[^:]*\d:\d{2}:(60)(?:\D|$)`)
 // same minute, as Dovecot reads it: time.Time cannot hold second 60, and
 // net/mail.ParseDate does not parse it.
 func parseRFC5322Date(value string) (time.Time, error) {
+	parsed, err := parseRFC5322DateValue(value)
+	return parsed.Time, err
+}
+
+func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 	// Unfold exactly as net/mail does, without turning an unpaired CR or LF
 	// before the zone into valid white space during the replacement below.
 	unfolded := strings.ReplaceAll(value, "\r\n", "")
 	if strings.ContainsAny(unfolded, "\r\n") {
-		return mail.ParseDate(value)
+		t, err := mail.ParseDate(value)
+		return parsedHeaderDate{Time: t}, err
 	}
+	isLeapSecond := false
 	if m := leapSecond.FindStringSubmatchIndex(unfolded); m != nil {
 		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
+		isLeapSecond = true
 	}
 	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
 		end := m[5]
@@ -187,7 +202,8 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// (unfolded is the value net/mail would see, with a leap second read
 		// as second 59).
 		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
-			return mail.ParseDate(unfolded)
+			t, err := mail.ParseDate(unfolded)
+			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
 		if !ok {
@@ -196,21 +212,27 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// An obs-zone needs no white space before it, a numeric zone does.
 		unfolded = unfolded[:m[2]] + " " + zone + unfolded[end:]
 	}
-	return mail.ParseDate(unfolded)
+	t, err := mail.ParseDate(unfolded)
+	return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 }
 
 // parseDateHeader parses a date from a header value
 // It supports various common date formats
 func parseDateHeader(value string) (time.Time, error) {
+	parsed, err := parseHeaderDate(value)
+	return parsed.Time, err
+}
+
+func parseHeaderDate(value string) (parsedHeaderDate, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return time.Time{}, fmt.Errorf("empty date value")
+		return parsedHeaderDate{}, fmt.Errorf("empty date value")
 	}
 
 	// Try RFC 2822 format first (most common for email)
-	t, err := parseRFC5322Date(value)
+	parsed, err := parseRFC5322DateValue(value)
 	if err == nil {
-		return t, nil
+		return parsed, nil
 	}
 
 	// Try other common formats
@@ -234,11 +256,11 @@ func parseDateHeader(value string) (time.Time, error) {
 	for _, format := range formats {
 		t, err := time.Parse(format, value)
 		if err == nil {
-			return t, nil
+			return parsedHeaderDate{Time: t}, nil
 		}
 	}
 
-	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
+	return parsedHeaderDate{}, fmt.Errorf("unable to parse date: %s", value)
 }
 
 // DateTest implements the "date" test from RFC 5260
@@ -283,24 +305,43 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	// The first field (RFC 5260 §4), or the one :index selects.
 	value := values[0]
 
-	// Parse the date from the header
-	t, err := parseDateHeader(value)
+	// Keep the header's second outside time.Time while converting its zone.
+	parsed, err := parseHeaderDate(value)
 	if err != nil {
 		return false, nil // Invalid date doesn't match
 	}
 
 	// Apply zone transformation
-	t = d.applyZone(t)
+	t := d.applyZone(parsed.Time)
 
 	// Extract the date part
 	datePart := DatePart(strings.ToLower(expandVars(rd, string(d.DatePart))))
-	partValue, err := extractDatePart(t, datePart)
+	partValue, err := extractHeaderDatePart(t, datePart, parsed.leapSecond)
 	if err != nil {
 		return false, err
 	}
 
 	// Match against keys
 	return d.matcherTest.tryMatch(ctx, rd, partValue)
+}
+
+// extractHeaderDatePart preserves a header's leap second in every part that
+// contains seconds (RFC 5260 section 4.2). Other parts use the clamped time.
+// Currentdate still extracts the representable time supplied by time.Now.
+func extractHeaderDatePart(t time.Time, part DatePart, isLeapSecond bool) (string, error) {
+	if isLeapSecond {
+		switch part {
+		case DatePartSecond:
+			return "60", nil
+		case DatePartTime:
+			return t.Format("15:04") + ":60", nil
+		case DatePartISO8601:
+			return t.Format("2006-01-02T15:04") + ":60" + t.Format("-07:00"), nil
+		case DatePartStd11:
+			return t.Format("Mon, 02 Jan 2006 15:04") + ":60 " + t.Format("-0700"), nil
+		}
+	}
+	return extractDatePart(t, part)
 }
 
 func (d DateTest) applyZone(t time.Time) time.Time {
