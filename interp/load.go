@@ -81,12 +81,12 @@ func init() {
 		"test":             loadDovecotTest,
 		"test_set":         loadDovecotTestSet,
 		"test_fail":        loadDovecotTestFail,
-		"test_binary_load": loadNoop, // go-sieve has no intermediate binary representation
-		"test_binary_save": loadNoop, // go-sieve has no intermediate binary representation
+		"test_binary_load": loadDovecotNoop, // go-sieve has no intermediate binary representation
+		"test_binary_save": loadDovecotNoop, // go-sieve has no intermediate binary representation
 		// "test_result_execute" // apply script results (validated using test_message)
 		// "test_mailbox_create"
 		// "test_imap_metadata_set"
-		"test_config_reload": loadNoop, // go-sieve applies changes immediately
+		"test_config_reload": loadDovecotNoop, // go-sieve applies changes immediately
 		"test_config_set":    loadDovecotConfigSet,
 		"test_config_unset":  loadDovecotConfigUnset,
 		// "test_result_reset"
@@ -180,8 +180,4 @@ type CmdNoop struct{}
 
 func (c CmdNoop) Execute(_ context.Context, _ *RuntimeData) error {
 	return nil
-}
-
-func loadNoop(_ *Script, _ parser.Cmd) (Cmd, error) {
-	return CmdNoop{}, nil
 }
