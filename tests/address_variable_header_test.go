@@ -2,7 +2,7 @@ package tests
 
 import "testing"
 
-// RFC 5228 §2.7.3: header names are always compared with "i;ascii-casemap",
+// RFC 5228 §2.7: header names are always compared with "i;ascii-casemap",
 // and RFC 5229 §3 replaces a variable reference before the string is used, so
 // an address test on a header named by a variable finds the header whatever
 // the case of the variable's value. The name was lowered before the variable
