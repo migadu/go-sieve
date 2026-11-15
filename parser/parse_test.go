@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -184,4 +186,63 @@ func TestParser(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestParseNumberQuantifierRange covers RFC 5228 §2.4.1: "K", "M" and "G"
+// multiply the number by 2^10, 2^20 and 2^30. The largest number that still
+// fits an int with its suffix is accepted with the exact product; one more is
+// refused at the number's position instead of wrapping to a wrong or negative
+// value, as a plain number too large for an int is refused by the lexer.
+func TestParseNumberQuantifierRange(t *testing.T) {
+	parseScript := func(script string) ([]Cmd, error) {
+		toks, err := lexer.Lex(strings.NewReader(script), &lexer.Options{})
+		if err != nil {
+			t.Fatalf("lex %q: %v", script, err)
+		}
+		return parse(lexer.NewStream(toks), 0, &Options{})
+	}
+
+	for _, q := range []struct {
+		suffix string
+		mult   int
+	}{
+		{"K", 1 << 10}, {"k", 1 << 10},
+		{"M", 1 << 20}, {"m", 1 << 20},
+		{"G", 1 << 30}, {"g", 1 << 30},
+	} {
+		largest := math.MaxInt / q.mult
+
+		t.Run(q.suffix+"/largest", func(t *testing.T) {
+			script := "if size :over " + strconv.Itoa(largest) + q.suffix + " { keep; }"
+			cmds, err := parseScript(script)
+			if err != nil {
+				t.Fatalf("parse %q: %v", script, err)
+			}
+			got := cmds[0].Tests[0].Args[1].(NumberArg).Value
+			if want := largest * q.mult; got != want {
+				t.Fatalf("parse %q: value %d, want %d", script, got, want)
+			}
+		})
+
+		t.Run(q.suffix+"/overflow", func(t *testing.T) {
+			script := "if size :over " + strconv.Itoa(largest+1) + q.suffix + " { keep; }"
+			cmds, err := parseScript(script)
+			if err == nil {
+				t.Fatalf("parse %q: accepted with value %d, want an error",
+					script, cmds[0].Tests[0].Args[1].(NumberArg).Value)
+			}
+			if !strings.HasPrefix(err.Error(), "1:15: ") {
+				t.Fatalf("parse %q: error %q, want it at the number (1:15)", script, err)
+			}
+		})
+	}
+
+	// A product that wraps past zero to a small positive value.
+	if math.MaxInt == math.MaxInt64 {
+		script := "if size :over 18014398509481985K { keep; }" // (2^54 + 1) * 2^10 = 2^64 + 1024
+		if cmds, err := parseScript(script); err == nil {
+			t.Fatalf("parse %q: accepted with value %d, want an error",
+				script, cmds[0].Tests[0].Args[1].(NumberArg).Value)
+		}
+	}
 }

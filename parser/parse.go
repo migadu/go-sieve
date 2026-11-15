@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"math"
+
 	"github.com/migadu/go-sieve/lexer"
 )
 
@@ -104,7 +106,15 @@ func readArguments(s *lexer.Stream, forTest bool, nesting int, opts *Options) ([
 			args = append(args, StringListArg{Value: list, Position: tok.Position})
 		case lexer.Number:
 			s.Pop()
-			args = append(args, NumberArg{Value: tok.Value * tok.Quantifier.Multiplier(), Position: tok.Position})
+			// RFC 5228 §2.4.1: a "K", "M" or "G" suffix multiplies the
+			// number by 2^10, 2^20 or 2^30. Refuse a product that does not
+			// fit an int, as the lexer refuses a plain number that does not,
+			// instead of letting it wrap to a wrong or negative value.
+			m := tok.Quantifier.Multiplier()
+			if tok.Value > math.MaxInt/m {
+				return nil, nil, s.Err("reading arguments: number %d%s is out of range", tok.Value, string(tok.Quantifier))
+			}
+			args = append(args, NumberArg{Value: tok.Value * m, Position: tok.Position})
 		case lexer.Colon:
 			s.Pop() // colon
 			idT := s.Pop()
