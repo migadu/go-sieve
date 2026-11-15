@@ -368,6 +368,11 @@ func TestSize(t *testing.T) {
 	t.Run("invalid-number-error", func(t *testing.T) {
 		testExecute(ctx, t, `if size :over "abc" { keep; }`, eml, true, Result{})
 	})
+	t.Run("quantifier-overflow-error", func(t *testing.T) {
+		// 2^53 K = 2^63 does not fit an int64; it must not wrap to a
+		// negative bound that every message is over.
+		testExecute(ctx, t, `if size :over 9007199254740992K { keep; }`, eml, true, Result{})
+	})
 }
 
 func TestDate(t *testing.T) {
