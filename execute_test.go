@@ -664,11 +664,11 @@ func TestMailbox(t *testing.T) {
 		})
 	})
 	t.Run("fileinto-create-with-flags", func(t *testing.T) {
-		// fileinto :create combined with flags
+		// fileinto :create combined with flags; :flags belongs to the filed copy
+		// and leaves the internal variable alone (RFC 5232 §5)
 		script := `require ["fileinto", "mailbox", "imap4flags"]; fileinto :create :flags "\\Seen" "Archive";`
 		testExecute(ctx, t, script, eml, false, Result{
 			Fileinto:     []string{"Archive"},
-			Flags:        []string{"\\seen"},
 			ImplicitKeep: false,
 		})
 	})
@@ -896,11 +896,21 @@ func TestFlags(t *testing.T) {
 		})
 	})
 	t.Run("keep-with-flags", func(t *testing.T) {
+		// :flags belongs to the kept copy, not to the internal variable (RFC 5232 §5)
 		script := `require "imap4flags"; keep :flags ["\\Answered", "MyFlag"];`
 		testExecute(ctx, t, script, eml, false, Result{
 			Keep:         true,
-			Flags:        []string{"\\answered", "myflag"},
 			ImplicitKeep: true, // keep does NOT cancel implicit keep
+		})
+	})
+	t.Run("fileinto-flags-leave-internal-variable", func(t *testing.T) {
+		// RFC 5232 §3: without :flags, keep and the implicit keep use the internal
+		// variable, which a fileinto :flags must not have changed.
+		script := `require ["fileinto", "imap4flags"]; addflag "Work"; fileinto :flags "\\Flagged" "Archive"; keep;`
+		testExecute(ctx, t, script, eml, false, Result{
+			Fileinto: []string{"Archive"},
+			Keep:     true,
+			Flags:    []string{"work"},
 		})
 	})
 }
