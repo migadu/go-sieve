@@ -46,6 +46,7 @@ type Spec struct {
 
 func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg, tests []parser.Test, block []parser.Cmd) error {
 	var lastTag *SpecTag
+	var lastTagArg parser.TagArg
 	nextPosArg := 0
 	for _, a := range args {
 		switch a := a.(type) {
@@ -206,10 +207,17 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 			}
 			if tag.NeedsValue {
 				lastTag = &tag
+				lastTagArg = a
 			} else {
 				tag.MatchBool()
 			}
 		}
+	}
+	// A tag that takes a value cannot end the arguments: the value is part
+	// of the tag's syntax (RFC 5232 §5: "Usage:   ":flags" <list-of-flags:
+	// string-list>").
+	if lastTag != nil && lastTag.NeedsValue {
+		return lexer.ErrorAt(lastTagArg, "LoadSpec: tagged argument :%s requires a value", lastTagArg.Value)
 	}
 	for i := nextPosArg; i < len(spec.Pos); i++ {
 		if !spec.Pos[i].Optional {
