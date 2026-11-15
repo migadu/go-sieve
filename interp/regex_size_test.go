@@ -175,6 +175,7 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 
 	refused := []string{
 		`^\pL{990}$`,
+		strings.Repeat(`[02KS\x80-\x{17e}\x{180}-\x{2129}\x{212b}-\x{10ffff}]{999}`, 4),
 		`^[\pL\pN]{100}$`,
 		"^" + strings.Repeat(`\pL`, 330) + "$",
 	}
@@ -209,7 +210,11 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 				t.Errorf("compileSafeRegexFor(%.40q, %s): %v", pattern, comparator, err)
 				continue
 			}
-			if perUnit := (after.TotalAlloc - before.TotalAlloc) / uint64(matcher.size); perUnit > 2048 {
+			// TotalAlloc includes validation of the original, Unicode-folded
+			// and actual ASCII-rewritten forms as well as compilation. Allow
+			// that transient parsing work; retained cache bytes are bounded by
+			// the separate post-GC cache tests.
+			if perUnit := (after.TotalAlloc - before.TotalAlloc) / uint64(matcher.size); perUnit > 4096 {
 				t.Errorf("compileSafeRegexFor(%.40q, %s): estimated %d instructions, allocated %d bytes for each", pattern, comparator, matcher.size, perUnit)
 			}
 		}
@@ -244,6 +249,7 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 // case of each letter to a class ([A-Z] holds 2 range ends, folded 8).
 func TestRegexProgramSizeCountsClasses(t *testing.T) {
 	patterns := []string{
+		`[02KS\x80-\x{17e}\x{180}-\x{2129}\x{212b}-\x{10ffff}]{999}`,
 		`^\pL{60}$`,
 		`[\pL\pN]{2,50}`,
 		`\p{Lu}{50}`,

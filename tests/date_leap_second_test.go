@@ -8,10 +8,11 @@ import (
 
 // The date test (RFC 5260 §4) reads a Date: header whose time-of-day is a
 // leap second: RFC 5322 §3.3 allows "00:00:00 through 23:59:60 (the number of
-// seconds allowing for a leap second ...)". It is read as second 59 of the
-// same minute. net/mail.ParseDate did not parse it, so every date test on such
-// a header was false, as for a field that "does not contain a syntactically
-// valid date-time specification".
+// seconds allowing for a leap second ...)". Its representable time is clamped
+// within the same minute, while the seconds-bearing Sieve parts retain 60.
+// net/mail.ParseDate did not parse it, so every date test on such a header was
+// false, as for a field that "does not contain a syntactically valid date-time
+// specification".
 func TestDateLeapSecond(t *testing.T) {
 	const script = `
 require "vnd.dovecot.testsuite";
@@ -28,20 +29,29 @@ Test.
 ;
 
 test "Leap second" {
+	if not date :originalzone "date" "second" "60" {
+		test_fail "leap second must be 60";
+	}
+	if date :originalzone "date" "second" "59" {
+		test_fail "leap second must not falsely match 59";
+	}
+	if not date :originalzone "date" "std11" "Sat, 31 Dec 2016 23:59:60 +0000" {
+		test_fail "std11 lost the leap second";
+	}
 	if not date :count "eq" :comparator "i;ascii-numeric" "date" "year" "1" {
 		test_fail "a leap second is not a date";
 	}
 	if not date :originalzone "date" "date" "2016-12-31" {
 		test_fail "leap second not on 2016-12-31";
 	}
-	if not date :originalzone "date" "time" "23:59:59" {
-		test_fail "leap second not read as 23:59:59";
+	if not date :originalzone "date" "time" "23:59:60" {
+		test_fail "leap second not read as 23:59:60";
 	}
 	if not date :zone "+0100" "date" "date" "2017-01-01" {
 		test_fail "leap second not on 2017-01-01 in +0100";
 	}
-	if not date :zone "+0100" "date" "time" "00:59:59" {
-		test_fail "leap second not read as 00:59:59 in +0100";
+	if not date :zone "+0100" "date" "time" "00:59:60" {
+		test_fail "leap second not read as 00:59:60 in +0100";
 	}
 }
 
@@ -57,8 +67,8 @@ test "Leap second in +0100" {
 	if not date :originalzone "date" "zone" "+0100" {
 		test_fail "original zone is not +0100";
 	}
-	if not date :zone "+0000" "date" "iso8601" "2016-12-31T23:59:59Z" {
-		test_fail "leap second in +0100 not 2016-12-31T23:59:59 UTC";
+	if not date :zone "+0000" "date" "iso8601" "2016-12-31T23:59:60Z" {
+		test_fail "leap second in +0100 not 2016-12-31T23:59:60 UTC";
 	}
 }
 `
@@ -74,4 +84,29 @@ test "Leap second in +0100" {
 			RunDovecotTestInline(t, "", script)
 		})
 	}
+}
+
+func TestDateLeapSecondAfterHeaderEdits(t *testing.T) {
+	RunDovecotTestInline(t, "", `
+require ["vnd.dovecot.testsuite", "date", "editheader", "variables"];
+test_set "message" text:
+Date: Sat, 31 Dec 2016 23:59:59 +0000
+Subject: Replaced Date field
+
+Test.
+.
+;
+test "Edited date retains leap-second parts" {
+	deleteheader "Date";
+	addheader "Date" "Sun, 1 Jan 2017 00:59:60 +0100";
+	set "zone" "+0000";
+	set "part" "iso8601";
+	if not date :zone "${zone}" :matches "Date" "${part}" "2016-12-31T23:59:*Z" {
+		test_fail "edited Date lost its leap second or UTC conversion";
+	}
+	if not string "${1}" "60" {
+		test_fail "date capture lost the edited leap second";
+	}
+}
+`)
 }

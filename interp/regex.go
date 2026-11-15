@@ -23,8 +23,8 @@ type RegexLimits struct {
 	// MaxPatternLength is the maximum length of a pattern, in bytes, as
 	// written.
 	MaxPatternLength int
-	// MaxProgramSize is the maximum size of the program a :regex pattern
-	// compiles to, in instructions, as estimated from the parsed pattern
+	// MaxProgramSize bounds a :regex pattern in weighted program-cost units:
+	// instructions plus a character-class range allowance, estimated from the pattern
 	// before it is compiled. Counted repetition multiplies what it repeats,
 	// so without this bound a pattern of MaxPatternLength bytes can compile
 	// to about a million instructions (some 45 MB). A compiled instruction
@@ -200,8 +200,8 @@ type SafeRegexMatcher struct {
 	find    findSubmatchFunc
 	pattern string
 	limits  RegexLimits
-	// size is the estimated size of the compiled program, in instructions
-	// (programSize); 0 for the binaryregexp :matches path.
+	// size is the estimated program cost from programSize, including character
+	// classes; 0 for the binaryregexp :matches path.
 	size       int
 	cacheBytes int // conservative retained cache charge; no parsed tree is kept
 }
@@ -260,8 +260,23 @@ func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, er
 			}
 		}
 	}
+	if size <= maxSize {
+		// ASCII folding is not a subset of Unicode folding in class cost:
+		// Unicode may fill gaps that the ASCII rewrite retains. Estimate the
+		// actual rewrite too. foldASCIICase mutates its AST, so use a fresh
+		// parse and leave re unchanged for the later comparator compilation.
+		if rawASCII, err := syntax.Parse(pattern, syntax.Perl); err == nil {
+			if expr, err := foldASCIICase(pattern, rawASCII); err == nil {
+				if folded, err := syntax.Parse(expr, syntax.Perl); err == nil {
+					if foldedSize := programSize(folded); foldedSize > size {
+						size = foldedSize
+					}
+				}
+			}
+		}
+	}
 	if size > maxSize {
-		return nil, 0, fmt.Errorf("regex too complex: compiles to about %d instructions > %d", size, maxSize)
+		return nil, 0, fmt.Errorf("regex too complex: estimated program cost %d units > %d", size, maxSize)
 	}
 	return re, size, nil
 }

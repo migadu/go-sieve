@@ -174,6 +174,13 @@ var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za
 // are 60: a leap second.
 var leapSecond = regexp.MustCompile(`^[^:]*\d:\d{2}:(60)(?:\D|$)`)
 
+// parsedHeaderDate keeps the RFC second outside time.Time, which cannot represent 60.
+// The time is clamped within the same minute for calendar and zone calculations.
+type parsedHeaderDate struct {
+	time.Time
+	leapSecond bool
+}
+
 // obsYear matches a date-time (RFC 5322 §3.3) up to a year of two or three
 // digits (obs-year, §4.3): the digits right before the hour, which the field's
 // first colon follows.
@@ -208,11 +215,17 @@ var obsYear = regexp.MustCompile(`^[^:]*[ \t](\d{2,3})[ \t]+\d{1,2}:`)
 // obs-minute and obs-second are each "[CFWS] ... [CFWS]"), so they are first
 // reduced to the separators net/mail's layouts have.
 func parseRFC5322Date(value string) (time.Time, error) {
+	parsed, err := parseRFC5322DateValue(value)
+	return parsed.Time, err
+}
+
+func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 	// Unfold exactly as net/mail does, without turning an unpaired CR or LF
 	// before the zone into valid white space during the replacement below.
 	unfolded := strings.ReplaceAll(value, "\r\n", "")
 	if strings.ContainsAny(unfolded, "\r\n") {
-		return mail.ParseDate(value)
+		t, err := mail.ParseDate(value)
+		return parsedHeaderDate{Time: t}, err
 	}
 	unfolded = normalizeCFWS(unfolded)
 	if m := obsYear.FindStringSubmatchIndex(unfolded); m != nil {
@@ -224,8 +237,10 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		}
 		unfolded = unfolded[:m[2]] + strconv.Itoa(year) + unfolded[m[3]:]
 	}
+	isLeapSecond := false
 	if m := leapSecond.FindStringSubmatchIndex(unfolded); m != nil {
 		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
+		isLeapSecond = true
 	}
 	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
 		end := m[5]
@@ -234,14 +249,16 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// its existing behavior for extensions it accepts, such as GMT+0000
 		// (unfolded already has its separators, year and leap second rewritten).
 		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
-			return mail.ParseDate(unfolded)
+			t, err := mail.ParseDate(unfolded)
+			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 		}
 		// Nor are the letters the zone when a numeric offset follows them after
 		// white space or a comment, as in "02:23:25 PM -0700": the grammar has
 		// one zone after the time of day ("time = time-of-day zone", §3.3), and
 		// net/mail would discard the offset after the replacement.
 		if rest := strings.TrimLeft(unfolded[end:], " \t"); rest != "" && (rest[0] == '+' || rest[0] == '-') {
-			return mail.ParseDate(unfolded)
+			t, err := mail.ParseDate(unfolded)
+			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
 		if !ok {
@@ -250,7 +267,8 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// An obs-zone needs no white space before it, a numeric zone does.
 		unfolded = unfolded[:m[2]] + " " + zone + unfolded[end:]
 	}
-	return mail.ParseDate(unfolded)
+	t, err := mail.ParseDate(unfolded)
+	return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 }
 
 // normalizeCFWS returns an unfolded date-time with every comment (RFC 5322
@@ -298,11 +316,15 @@ func normalizeCFWS(s string) string {
 func isDigit(c byte) bool { return '0' <= c && c <= '9' }
 
 // commentLen returns the length of the comment s starts with, nested comments
-// and quoted-pairs included (RFC 5322 §3.2.2), or 0 if it does not close.
+// and quoted-pairs included (RFC 5322 §3.2.2), or 0 if it is malformed or
+// does not close. An unquoted NUL is not ctext, including obsolete ctext;
+// a quoted NUL remains allowed by obs-qp (§4.1).
 func commentLen(s string) int {
 	depth := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
+		case 0:
+			return 0
 		case '\\':
 			i++
 		case '(':
@@ -320,15 +342,20 @@ func commentLen(s string) int {
 // in a Date: field, or else the text after its last semicolon, as in a
 // Received: field. It supports various common date formats.
 func parseDateHeader(value string) (time.Time, error) {
+	parsed, err := parseHeaderDate(value)
+	return parsed.Time, err
+}
+
+func parseHeaderDate(value string) (parsedHeaderDate, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return time.Time{}, fmt.Errorf("empty date value")
+		return parsedHeaderDate{}, fmt.Errorf("empty date value")
 	}
 
 	// Try RFC 2822 format first (most common for email)
-	t, err := parseRFC5322Date(value)
+	parsed, err := parseRFC5322DateValue(value)
 	if err == nil {
-		return t, nil
+		return parsed, nil
 	}
 
 	// Try other common formats
@@ -352,7 +379,7 @@ func parseDateHeader(value string) (time.Time, error) {
 	for _, format := range formats {
 		t, err := time.Parse(format, value)
 		if err == nil {
-			return t, nil
+			return parsedHeaderDate{Time: t}, nil
 		}
 	}
 
@@ -361,10 +388,10 @@ func parseDateHeader(value string) (time.Time, error) {
 	// field)", and with more than one "the last one that appears SHOULD be
 	// used". Semicolons in comments or quoted strings are not separators.
 	if i := lastDateSeparator(value); i >= 0 {
-		return parseDateHeader(value[i+1:])
+		return parseHeaderDate(value[i+1:])
 	}
 
-	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
+	return parsedHeaderDate{}, fmt.Errorf("unable to parse date: %s", value)
 }
 
 // lastDateSeparator returns the last semicolon outside comments, quoted
@@ -468,23 +495,42 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	// The first field (RFC 5260 §4), or the one :index selects.
 	value := values[0]
 
-	// Parse the date from the header
-	t, err := parseDateHeader(value)
+	// Keep the header's second outside time.Time while converting its zone.
+	parsed, err := parseHeaderDate(value)
 	if err != nil {
 		return false, nil // Invalid date doesn't match
 	}
 
 	// Apply zone transformation
-	t = d.applyZone(rd, t)
+	t := d.applyZone(rd, parsed.Time)
 
-	// Extract the date part
-	partValue, err := extractDatePart(t, datePart)
+	// Extract the date part while retaining the header's leap second.
+	partValue, err := extractHeaderDatePart(t, datePart, parsed.leapSecond)
 	if err != nil {
 		return false, err
 	}
 
 	// Match against keys
 	return d.matcherTest.tryMatch(ctx, rd, partValue)
+}
+
+// extractHeaderDatePart preserves a header's leap second in every part that
+// contains seconds (RFC 5260 section 4.2). Other parts use the clamped time.
+// Currentdate still extracts the representable time supplied by time.Now.
+func extractHeaderDatePart(t time.Time, part DatePart, isLeapSecond bool) (string, error) {
+	if isLeapSecond {
+		switch part {
+		case DatePartSecond:
+			return "60", nil
+		case DatePartTime:
+			return t.Format("15:04") + ":60", nil
+		case DatePartISO8601:
+			return t.Format("2006-01-02T15:04") + ":60" + t.Format("Z07:00"), nil
+		case DatePartStd11:
+			return t.Format("Mon, 02 Jan 2006 15:04") + ":60 " + t.Format("-0700"), nil
+		}
+	}
+	return extractDatePart(t, part)
 }
 
 func (d DateTest) applyZone(rd *RuntimeData, t time.Time) time.Time {
