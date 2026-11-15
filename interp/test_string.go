@@ -106,7 +106,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, false)
 		case MatchRegex:
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			return rel.CompareString(value, key), nil, nil
 		case MatchCount:
@@ -144,9 +144,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, true)
 		case MatchRegex:
-			// For case-insensitive regex, normalize value but not pattern
-			value = toLowerASCII(value)
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -165,9 +163,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchUnicode(ctx, key, value, true)
 		case MatchRegex:
-			// For Unicode case-insensitive regex, normalize value but not pattern
-			value = strings.ToLower(value)
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -275,21 +271,39 @@ func toLowerASCII(s string) string {
 	return b.String()
 }
 
-// matchRegex performs safe regex matching and returns match result and capture groups
-func matchRegex(ctx context.Context, pattern, value string) (bool, []string, error) {
+// compileRegex compiles a :regex key for comparator through the bounded
+// executor; the matcher returns the match result and the capture groups. The
+// casemap comparators match the pattern, as written, against the value
+// lowercased. setKey compiles a key without variables once, when the script
+// loads, and matchRegex any other key when its test runs, so both match alike.
+func compileRegex(pattern string, comparator Comparator) (CompiledMatcher, error) {
 	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 
-	matches, err := matcher.FindSubmatch(ctx, value)
+	fold := func(value string) string { return value }
+	switch comparator {
+	case ComparatorASCIICaseMap:
+		fold = toLowerASCII
+	case ComparatorUnicodeCaseMap:
+		fold = strings.ToLower
+	}
+
+	return func(ctx context.Context, value string) (bool, []string, error) {
+		matches, err := matcher.FindSubmatch(ctx, fold(value))
+		if err != nil {
+			return false, nil, err
+		}
+		return matches != nil, matches, nil
+	}, nil
+}
+
+// matchRegex matches value against a :regex key known only when the test runs.
+func matchRegex(ctx context.Context, comparator Comparator, pattern, value string) (bool, []string, error) {
+	matcher, err := compileRegex(pattern, comparator)
 	if err != nil {
 		return false, nil, err
 	}
-
-	if matches == nil {
-		return false, nil, nil
-	}
-
-	return true, matches, nil
+	return matcher(ctx, value)
 }
