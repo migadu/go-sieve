@@ -179,8 +179,8 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 	// draft-murchison-sieve-regex §3: "Implementations SHOULD reject regular
 	// expressions that are unsupported by this specification as a syntax
 	// error." The key is only checked, as Pigeonhole does, and compiled when
-	// its test runs, once per execution (RuntimeData.regexes): counted
-	// repetition lets a key of a few bytes compile to MaxProgramSize
+	// its test runs, with reuse in the bounded RuntimeData.regexes cache:
+	// counted repetition lets a key of a few bytes compile to MaxProgramSize
 	// instructions, so compiling and keeping every key of a script would let
 	// one script hold hundreds of megabytes.
 	if t.match == MatchRegex {
