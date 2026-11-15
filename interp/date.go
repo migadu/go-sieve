@@ -316,8 +316,9 @@ func commentLen(s string) int {
 	return 0
 }
 
-// parseDateHeader parses a date from a header value
-// It supports various common date formats
+// parseDateHeader parses the date-time of a header value: the whole value, as
+// in a Date: field, or else the text after its last semicolon, as in a
+// Received: field. It supports various common date formats.
 func parseDateHeader(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -355,7 +356,64 @@ func parseDateHeader(value string) (time.Time, error) {
 		}
 	}
 
+	// RFC 5260 §4: the date-time may also appear "at the end of a header field
+	// following a semicolon (e.g., as it does in a standard Received: header
+	// field)", and with more than one "the last one that appears SHOULD be
+	// used". Semicolons in comments or quoted strings are not separators.
+	if i := lastDateSeparator(value); i >= 0 {
+		return parseDateHeader(value[i+1:])
+	}
+
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
+}
+
+// lastDateSeparator returns the last semicolon outside comments, quoted
+// strings and domain-literals (the tokens of a Received field, RFC 5322
+// section 3.6.7). Each may contain quoted-pairs; comments may also nest. The
+// suffix is parsed as a complete date-time, including trailing CFWS.
+func lastDateSeparator(value string) int {
+	last, depth := -1, 0
+	quoted, literal := false, false
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c == '\\' && (quoted || literal || depth > 0) {
+			i++ // a quoted-pair cannot open or close either construct
+			continue
+		}
+		if depth > 0 {
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			continue
+		}
+		if quoted {
+			if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		if literal {
+			if c == ']' {
+				literal = false
+			}
+			continue
+		}
+
+		switch c {
+		case '(':
+			depth = 1
+		case '"':
+			quoted = true
+		case '[':
+			literal = true
+		case ';':
+			last = i
+		}
+	}
+	return last
 }
 
 // DateTest implements the "date" test from RFC 5260
