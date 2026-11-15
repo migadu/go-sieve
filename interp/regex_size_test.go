@@ -210,7 +210,11 @@ func TestRegexCharClassSizeBounded(t *testing.T) {
 				t.Errorf("compileSafeRegexFor(%.40q, %s): %v", pattern, comparator, err)
 				continue
 			}
-			if perUnit := (after.TotalAlloc - before.TotalAlloc) / uint64(matcher.size); perUnit > 2048 {
+			// TotalAlloc includes validation of the original, Unicode-folded
+			// and actual ASCII-rewritten forms as well as compilation. Allow
+			// that transient parsing work; retained cache bytes are bounded by
+			// the separate post-GC cache tests.
+			if perUnit := (after.TotalAlloc - before.TotalAlloc) / uint64(matcher.size); perUnit > 4096 {
 				t.Errorf("compileSafeRegexFor(%.40q, %s): estimated %d instructions, allocated %d bytes for each", pattern, comparator, matcher.size, perUnit)
 			}
 		}
