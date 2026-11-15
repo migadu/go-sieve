@@ -65,6 +65,7 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 		},
 	})
 	loaded.mime.addSpecTags(spec.Tags, false)
+	loaded.addIndexTags(spec.Tags)
 	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
 		return nil, err
@@ -74,6 +75,9 @@ func loadAddressTest(s *Script, test parser.Test) (Test, error) {
 		return nil, err
 	}
 	if err := loaded.mime.validate(s, test.Position); err != nil {
+		return nil, err
+	}
+	if err := loaded.validateIndex(s, test.Position); err != nil {
 		return nil, err
 	}
 
@@ -267,6 +271,7 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 		},
 	})
 	loaded.mime.addSpecTags(spec.Tags, true)
+	loaded.addIndexTags(spec.Tags)
 	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
 		return nil, err
@@ -276,6 +281,9 @@ func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 		return nil, err
 	}
 	if err := loaded.mime.validate(s, test.Position); err != nil {
+		return nil, err
+	}
+	if err := loaded.validateIndex(s, test.Position); err != nil {
 		return nil, err
 	}
 
