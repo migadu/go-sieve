@@ -9,7 +9,7 @@ import (
 
 var argumentRulesExtensions = []string{
 	"fileinto", "envelope", "copy", "vacation", "variables", "relational",
-	"body", "date", "editheader",
+	"body", "date", "editheader", "regex",
 	"comparator-i;octet", "comparator-i;ascii-casemap",
 	"comparator-i;ascii-numeric", "comparator-i;unicode-casemap",
 }
@@ -152,6 +152,55 @@ func TestDeleteheaderWithoutValuePatternsIgnoresMatchOptions(t *testing.T) {
 		`require ["editheader", "comparator-i;ascii-numeric"]; deleteheader :comparator "i;ascii-numeric" :contains "X-Count";`,
 		`require ["editheader", "comparator-i;ascii-numeric"]; deleteheader :comparator "i;ascii-numeric" :matches "X-Count";`,
 		`require "editheader"; deleteheader :matches "X-Count";`,
+	}
+	for _, script := range accepted {
+		if err := loadWithArgumentRulesExtensions(script); err != nil {
+			t.Errorf("%s: %v", script, err)
+		}
+	}
+}
+
+// RFC 5228 §2.10.5: "If an extension is not enabled with "require",
+// implementations MUST treat it as if they did not support it at all." The
+// regex draft adds ":regex" to every command that takes a match type, so each
+// of them refuses it unless the script requires "regex", as Pigeonhole does.
+func TestRegexMatchTypeNeedsRequire(t *testing.T) {
+	refused := []struct {
+		name   string
+		script string
+	}{
+		{"header", `if header :regex "Subject" "^x" { stop; }`},
+		{"address", `if address :regex "from" "^x" { stop; }`},
+		{"envelope", `require "envelope"; if envelope :regex "from" "^x" { stop; }`},
+		{"string", `require "variables"; if string :regex "abc" "^a" { stop; }`},
+		{"body", `require "body"; if body :regex "^x" { stop; }`},
+		{"date", `require "date"; if date :regex "date" "year" "^2" { stop; }`},
+		{"currentdate", `require "date"; if currentdate :regex "year" "^2" { stop; }`},
+		{"deleteheader with value patterns", `require "editheader"; deleteheader :regex "X-Foo" "^x";`},
+		{"deleteheader without value patterns", `require "editheader"; deleteheader :regex "X-Foo";`},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			err := loadWithArgumentRulesExtensions(tc.script)
+			if err == nil {
+				t.Fatal("load succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), "missing require 'regex'") {
+				t.Fatalf("error %q, want it to contain %q", err, "missing require 'regex'")
+			}
+		})
+	}
+
+	accepted := []string{
+		`require "regex"; if header :regex "Subject" "^x" { stop; }`,
+		`require "regex"; if address :regex "from" "^x" { stop; }`,
+		`require ["envelope", "regex"]; if envelope :regex "from" "^x" { stop; }`,
+		`require ["variables", "regex"]; if string :regex "abc" "^a" { stop; }`,
+		`require ["body", "regex"]; if body :regex "^x" { stop; }`,
+		`require ["date", "regex"]; if date :regex "date" "year" "^2" { stop; }`,
+		`require ["date", "regex"]; if currentdate :regex "year" "^2" { stop; }`,
+		`require ["editheader", "regex"]; deleteheader :regex "X-Foo" "^x";`,
+		`require ["editheader", "regex"]; deleteheader :regex "X-Foo";`,
 	}
 	for _, script := range accepted {
 		if err := loadWithArgumentRulesExtensions(script); err != nil {
