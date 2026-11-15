@@ -235,6 +235,13 @@ func (e EnvelopeTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			value = d.Envelope.EnvelopeTo()
 		case "auth":
 			value = d.Envelope.AuthUsername()
+			if value == "" {
+				// No authenticated user, so no value: the part matches
+				// no key, the empty one included, and counts none, as in
+				// Pigeonhole and Cyrus. The null reverse-path differs:
+				// RFC 5228 §5.4 matches it "as the empty string".
+				continue
+			}
 		default:
 			return false, fmt.Errorf("envelope: unsupported envelope-part: %v", field)
 		}
