@@ -145,9 +145,11 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 // original subject. An appropriate fixed Subject, such as "Automated reply",
 // SHOULD be used in the event that :subject isn't specified and the original
 // message doesn't contain a Subject field." The original is decoded (RFC 2047),
-// as the reply's subject is given unencoded.
+// as the reply's subject is given unencoded. It is the Subject as editheader
+// left it (RFC 5293 §7: "vacation" MUST "examine the current state of a header
+// as modified by any actions that have taken place so far").
 func defaultVacationSubject(d *RuntimeData) string {
-	if values, err := d.Msg.HeaderGet("Subject"); err == nil && len(values) > 0 {
+	if values, err := GetHeaderWithEdits(d, "Subject"); err == nil && len(values) > 0 {
 		if original := strings.TrimSpace(decodeHeaderValue(values[0])); original != "" {
 			return "Auto: " + original
 		}
