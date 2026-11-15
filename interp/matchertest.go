@@ -173,8 +173,16 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 	// Note: :count always performs numeric comparison internally via countMatches(),
 	// regardless of the comparator setting. The comparator is not used for :count.
 
-	if (t.match == MatchContains || t.match == MatchMatches) && t.comparator == ComparatorASCIINumeric {
-		return fmt.Errorf("numeric comparator cannot be used with :contains or :matches")
+	// RFC 5228 §2.7.1: "It is an error to use a comparator with ":contains"
+	// or ":matches" that is not compatible with it." The regex draft (§3)
+	// puts ":regex" under "the same rules and restrictions", and
+	// i;ascii-numeric "does not support the substring operation" (RFC 4790
+	// §9.1.1).
+	if t.comparator == ComparatorASCIINumeric {
+		switch t.match {
+		case MatchContains, MatchMatches, MatchRegex:
+			return fmt.Errorf("numeric comparator cannot be used with :%s", t.match)
+		}
 	}
 
 	return nil
