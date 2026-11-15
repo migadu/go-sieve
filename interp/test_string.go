@@ -106,7 +106,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, false)
 		case MatchRegex:
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			return rel.CompareString(value, key), nil, nil
 		case MatchCount:
@@ -144,9 +144,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchOctet(ctx, key, value, true)
 		case MatchRegex:
-			// For case-insensitive regex, normalize value but not pattern
-			value = toLowerASCII(value)
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -165,9 +163,7 @@ func testString(ctx context.Context, comparator Comparator, match Match, rel Rel
 		case MatchMatches:
 			return matchUnicode(ctx, key, value, true)
 		case MatchRegex:
-			// For Unicode case-insensitive regex, normalize value but not pattern
-			value = strings.ToLower(value)
-			return matchRegex(ctx, key, value)
+			return matchRegex(ctx, comparator, key, value)
 		case MatchValue:
 			value = toLowerASCII(value)
 			key = toLowerASCII(key)
@@ -275,9 +271,10 @@ func toLowerASCII(s string) string {
 	return b.String()
 }
 
-// matchRegex performs safe regex matching and returns match result and capture groups
-func matchRegex(ctx context.Context, pattern, value string) (bool, []string, error) {
-	matcher, err := CompileSafeRegex(pattern, DefaultRegexLimits)
+// matchRegex matches value against pattern under comparator and returns the
+// match variables, which hold value's own text whatever the comparator.
+func matchRegex(ctx context.Context, comparator Comparator, pattern, value string) (bool, []string, error) {
+	matcher, err := compileSafeRegexFor(pattern, comparator, DefaultRegexLimits)
 	if err != nil {
 		return false, nil, err
 	}
