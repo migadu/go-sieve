@@ -41,8 +41,8 @@ func loadRegexCacheExecutionScript(t *testing.T, source string) *Script {
 // headers. Running out of cache space must change retention, never matching.
 func TestRegexCacheExecutionAfterByteBudget(t *testing.T) {
 	const parts = 32
-	letters := strings.Repeat("Ü", 40)
-	const finalKey = `^(\pL{40})u-key-31$`
+	letters := strings.Repeat("Ü", 10)
+	const finalKey = `^(\pL{10})u-key-31$`
 	for _, tc := range []struct {
 		name       string
 		comparator Comparator
@@ -63,7 +63,7 @@ set "input" %s;
 foreverypart {
 	if header :mime :matches "X-Key" "*" {
 		set "partkey" "${1}";
-		set "key" "^(\\pL{40})u${partkey}$";
+		set "key" "^(\\pL{10})u${partkey}$";
 		if string :regex %s "${input}" "${key}" {
 			set "dynamic" "${0}";
 			set "letters" "${1}";
@@ -176,6 +176,33 @@ func TestRegexCacheExecutionCopyIsolated(t *testing.T) {
 	}
 	if copied.Variables["capture"] != "ABC" || original.Variables["capture"] != "ABC" {
 		t.Error("copy changed captured source text")
+	}
+}
+
+func TestRegexCacheExecutionOversizeEntryFallback(t *testing.T) {
+	letters := strings.Repeat("Ü", 40)
+	const pattern = `^(\pL{40})$`
+	for _, comparator := range []Comparator{ComparatorOctet, ComparatorASCIICaseMap, ComparatorUnicodeCaseMap} {
+		t.Run(string(comparator), func(t *testing.T) {
+			flag := ":comparator " + strconv.Quote(string(comparator))
+			script := loadRegexCacheExecutionScript(t, fmt.Sprintf(`
+require ["regex", "variables", "comparator-i;unicode-casemap"];
+set "input" %s;
+set "key" %s;
+if string :regex %s "${input}" %s { set "static" "${1}"; }
+if string :regex %s "${input}" "${key}" { set "dynamic" "${1}"; }
+`, strconv.Quote(letters), strconv.Quote(pattern), flag, strconv.Quote(pattern), flag))
+			data := NewRuntimeData(script, DummyPolicy{}, EnvelopeStatic{}, MessageStatic{})
+			if err := script.Execute(context.Background(), data); err != nil {
+				t.Fatal(err)
+			}
+			if data.Variables["static"] != letters || data.Variables["dynamic"] != letters {
+				t.Fatalf("large legal key did not retain original captures: %v", data.Variables)
+			}
+			if data.regexes.bytes != 0 || data.regexes.size != 0 || len(data.regexes.matchers) != 0 {
+				t.Fatal("individually oversized cache entry was retained")
+			}
+		})
 	}
 }
 
