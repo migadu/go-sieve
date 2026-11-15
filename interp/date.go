@@ -184,8 +184,9 @@ func parseRFC5322Date(value string) (time.Time, error) {
 	return mail.ParseDate(unfolded)
 }
 
-// parseDateHeader parses a date from a header value
-// It supports various common date formats
+// parseDateHeader parses the date-time of a header value: the whole value, as
+// in a Date: field, or else the text after its last semicolon, as in a
+// Received: field. It supports various common date formats.
 func parseDateHeader(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -221,6 +222,14 @@ func parseDateHeader(value string) (time.Time, error) {
 		if err == nil {
 			return t, nil
 		}
+	}
+
+	// RFC 5260 §4: the date-time may also appear "at the end of a header field
+	// following a semicolon (e.g., as it does in a standard Received: header
+	// field)", and with more than one "the last one that appears SHOULD be
+	// used". The text after the last semicolon has none, so this recurses once.
+	if i := strings.LastIndexByte(value, ';'); i >= 0 {
+		return parseDateHeader(value[i+1:])
 	}
 
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
