@@ -34,6 +34,7 @@ func loadWithRegexKeyExtensions(script string) (*sieve.Script, error) {
 // message.
 func TestRegexKeyRefusedAtLoad(t *testing.T) {
 	tooLong := strings.Repeat("a", interp.DefaultRegexLimits.MaxPatternLength+1)
+	tooLarge := "(?:" + strings.Repeat("a", 990) + "){1000}"
 	refused := []struct {
 		name   string
 		script string
@@ -43,6 +44,7 @@ func TestRegexKeyRefusedAtLoad(t *testing.T) {
 		{"header i;unicode-casemap", `require ["regex", "comparator-i;unicode-casemap"]; if header :regex :comparator "i;unicode-casemap" "Subject" "(" { stop; }`},
 		{"one bad key of several", `require "regex"; if header :regex "Subject" ["^a", "[z-a]"] { stop; }`},
 		{"pattern too long", `require "regex"; if header :regex "Subject" "` + tooLong + `" { stop; }`},
+		{"program too large", `require "regex"; if header :regex "Subject" "` + tooLarge + `" { stop; }`},
 		{"address", `require "regex"; if address :regex "from" "a{2,1}" { stop; }`},
 		{"envelope", `require ["envelope", "regex"]; if envelope :regex "from" "(" { stop; }`},
 		// The keys of Pigeonhole's tests/extensions/regex/errors/compile.sieve.
@@ -83,14 +85,15 @@ func TestRegexKeyRefusedAtLoad(t *testing.T) {
 }
 
 // A :regex key is checked, not compiled, when the script loads. Counted
-// repetition makes a key of MaxPatternLength bytes, such as "(?:a...a){1000}",
-// compile to a program of some 45 MB in some 40 ms, so compiling and keeping
-// every key of a script under ManageSieve's 16 KB limit made each load (each
-// PUTSCRIPT, each script compiled for delivery) take half a second and hold
-// close to 700 MB for as long as the script was kept.
+// repetition makes a key of a few bytes, such as "(?:abcdefghi){1000}",
+// compile to a program of 9000 instructions, within MaxProgramSize, which
+// allocates some 1.7 MB and keeps some 0.4 MB, so compiling and keeping every
+// key of a script under ManageSieve's 16 KB limit would make each load (each
+// PUTSCRIPT, each script compiled for delivery) allocate over a gigabyte and
+// hold some 300 MB for as long as the script was kept.
 func TestRegexKeyCheckAtLoadDoesNotCompile(t *testing.T) {
-	key := `"(?:` + strings.Repeat("a", 990) + `){1000}"`
-	keys := make([]string, 15)
+	key := `"(?:abcdefghi){1000}"`
+	keys := make([]string, 40)
 	for i := range keys {
 		keys[i] = key
 	}
@@ -157,5 +160,79 @@ if header :regex :comparator %q "Subject" "${p}" { fileinto "hit-${1}"; }`, patt
 				t.Errorf("%s %q: the constant key filed into %q, the key through a variable into %q", comparator, pattern, atLoad, atRun)
 			}
 		}
+	}
+}
+
+// A :regex key known only when the test runs is refused then, as the same key
+// written as a string is refused at load, when its program would be too large.
+// It used to be compiled, to about a million instructions, for every value the
+// test matched it against.
+func TestRegexKeyTooLargeRefusedAtRunTime(t *testing.T) {
+	script := `require ["fileinto", "variables", "regex"];
+set "p" "(?:` + strings.Repeat("a", 990) + `){1000}";
+if header :regex "Received" "${p}" { fileinto "hit"; }`
+	loaded, err := loadWithRegexKeyExtensions(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := strings.Repeat("Received: from host.example.com by mx.example.org\r\n", 10) + "Subject: x\r\n\r\nBody.\r\n"
+	hdr, err := textproto.NewReader(bufio.NewReader(strings.NewReader(message))).ReadMIMEHeader()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := sieve.NewRuntimeData(loaded, interp.DummyPolicy{},
+		interp.EnvelopeStatic{From: "from@example.com", To: "to@example.com"},
+		interp.MessageStatic{Size: len(message), Header: hdr})
+	if err := loaded.Execute(context.Background(), data); err == nil || !strings.Contains(err.Error(), "too complex") {
+		t.Fatalf("Execute: %v, want a too complex error", err)
+	}
+}
+
+// A :regex key is compiled once, not once for every value the test matches it
+// against: Pigeonhole likewise compiles each key once per match operation
+// (mcht_regex_match_keys) and reuses it for every value. The key compiles to
+// 8000 instructions, within the bound, so matching it against ten Received
+// fields allocated ten times what matching it against one does.
+func TestRegexKeyCompiledOncePerExecution(t *testing.T) {
+	const key = "(?:abcdefgh){1000}"
+	scripts := map[string]string{
+		"constant": `require ["fileinto", "regex"];
+if header :regex "Received" "` + key + `" { fileinto "hit"; }`,
+		"variable": `require ["fileinto", "variables", "regex"];
+set "p" "` + key + `";
+if header :regex "Received" "${p}" { fileinto "hit"; }`,
+	}
+	for name, script := range scripts {
+		t.Run(name, func(t *testing.T) {
+			loaded, err := loadWithRegexKeyExtensions(script)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execute := func(fields int) uint64 {
+				message := strings.Repeat("Received: from host.example.com by mx.example.org\r\n", fields) + "Subject: x\r\n\r\nBody.\r\n"
+				hdr, err := textproto.NewReader(bufio.NewReader(strings.NewReader(message))).ReadMIMEHeader()
+				if err != nil {
+					t.Fatal(err)
+				}
+				data := sieve.NewRuntimeData(loaded, interp.DummyPolicy{},
+					interp.EnvelopeStatic{From: "from@example.com", To: "to@example.com"},
+					interp.MessageStatic{Size: len(message), Header: hdr})
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				err = loaded.Execute(context.Background(), data)
+				runtime.ReadMemStats(&after)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(data.Mailboxes) != 0 {
+					t.Fatalf("filed into %q", data.Mailboxes)
+				}
+				return after.TotalAlloc - before.TotalAlloc
+			}
+			one, ten := execute(1), execute(10)
+			if ten > 2*one {
+				t.Fatalf("matching the key against ten fields allocated %d KB, against one %d KB", ten>>10, one>>10)
+			}
+		})
 	}
 }
