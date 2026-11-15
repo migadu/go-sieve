@@ -91,9 +91,11 @@ func (t *matcherTest) addSpecTags(s *Spec) *Spec {
 	return s
 }
 
-func (t *matcherTest) setKey(s *Script, k []string) error {
-	t.key = k
-
+// checkOptions refuses comparator and match-type options that are wrong in
+// themselves, whatever they are matched against: more than one match type,
+// :count or :value without relational or with an unknown operator, and a
+// comparator that is unknown or that the script does not require.
+func (t *matcherTest) checkOptions(s *Script) error {
 	if t.matchCnt > 1 {
 		return fmt.Errorf("multiple match-types are not allowed")
 	}
@@ -111,6 +113,29 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 		}
 	}
 
+	switch t.comparator {
+	case ComparatorOctet, ComparatorASCIICaseMap:
+	case ComparatorASCIINumeric, ComparatorUnicodeCaseMap:
+		// RFC 5228 §2.7.3: "Comparators other than "i;octet" and
+		// "i;ascii-casemap" must be declared with require [...] If the
+		// comparator is not declared with require, it is also an error, even
+		// if the comparator is supported."
+		if !s.RequiresExtension("comparator-" + string(t.comparator)) {
+			return fmt.Errorf("missing require 'comparator-%s'", t.comparator)
+		}
+	default:
+		return fmt.Errorf("unsupported comparator: %v", t.comparator)
+	}
+	return nil
+}
+
+func (t *matcherTest) setKey(s *Script, k []string) error {
+	t.key = k
+
+	if err := t.checkOptions(s); err != nil {
+		return err
+	}
+
 	caseFold := false
 	octet := false
 	switch t.comparator {
@@ -121,9 +146,6 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 	case ComparatorASCIICaseMap:
 		octet = true
 		caseFold = true
-	case ComparatorASCIINumeric:
-	default:
-		return fmt.Errorf("unsupported comparator: %v", t.comparator)
 	}
 
 	if t.match == MatchMatches {

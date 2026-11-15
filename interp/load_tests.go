@@ -289,8 +289,11 @@ func loadSizeTest(s *Script, test parser.Test) (Test, error) {
 			},
 		},
 	}, test.Position, test.Args, test.Tests, nil)
+	if err != nil {
+		return nil, err
+	}
 	if loaded.Under == loaded.Over {
 		return nil, fmt.Errorf("loadSizeTest: either under or over is required")
 	}
-	return loaded, err
+	return loaded, nil
 }
