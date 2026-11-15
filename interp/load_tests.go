@@ -220,6 +220,33 @@ func loadTrueTest(s *Script, test parser.Test) (Test, error) {
 	return loaded, err
 }
 
+func loadHasFlagTest(s *Script, test parser.Test) (Test, error) {
+	if !s.RequiresExtension("imap4flags") {
+		return nil, parser.ErrorAt(test.Position, "missing require 'imap4flags'")
+	}
+	loaded := HasFlagTest{matcherTest: newMatcherTest()}
+	var args flagArgs
+	err := LoadSpec(s, loaded.addSpecTags(&Spec{Pos: args.spec()}), test.Position, test.Args, test.Tests, nil)
+	if err != nil {
+		return nil, err
+	}
+	variables, key, err := args.split(s, test.Position, false)
+	if err != nil {
+		return nil, err
+	}
+	loaded.Variables = variables
+
+	if err := loaded.setKey(s, key); err != nil {
+		return nil, err
+	}
+
+	if loaded.match == MatchRegex && !s.RequiresExtension("regex") {
+		return nil, fmt.Errorf("missing require 'regex'")
+	}
+
+	return loaded, nil
+}
+
 func loadHeaderTest(s *Script, test parser.Test) (Test, error) {
 	loaded := HeaderTest{matcherTest: newMatcherTest()}
 	var key []string

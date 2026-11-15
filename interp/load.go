@@ -107,6 +107,8 @@ func init() {
 		"size":     loadSizeTest,
 		// RFC 5229 (variables extension)
 		"string": loadStringTest,
+		// RFC 5232 (imap4flags extension)
+		"hasflag": loadHasFlagTest,
 		// RFC 5260 (date extension)
 		"date":        loadDateTest,
 		"currentdate": loadCurrentDateTest,
