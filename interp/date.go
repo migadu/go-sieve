@@ -146,7 +146,7 @@ var obsZones = map[string]string{
 // alphabeticZone matches a date-time (RFC 5322 §3.3) up to the end of its
 // time-of-day (the field's first colon is the one after the hour) and the run
 // of letters that follows it after any folding white space: the zone.
-var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za-z]+)`)
+var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ 	]*)([A-Za-z]+)`)
 
 // parseRFC5322Date parses an RFC 5322 date-time (§3.3) like net/mail.ParseDate,
 // but reads an alphabetic zone by RFC 5322 §4.3 instead of by the server's time
@@ -171,7 +171,7 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
 		// net/mail would discard the suffix after a numeric replacement. Keep
 		// its existing behavior for extensions it accepts, such as GMT+0000.
-		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
+		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '	' && unfolded[end] != '(' {
 			return mail.ParseDate(value)
 		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
@@ -227,12 +227,51 @@ func parseDateHeader(value string) (time.Time, error) {
 	// RFC 5260 §4: the date-time may also appear "at the end of a header field
 	// following a semicolon (e.g., as it does in a standard Received: header
 	// field)", and with more than one "the last one that appears SHOULD be
-	// used". The text after the last semicolon has none, so this recurses once.
-	if i := strings.LastIndexByte(value, ';'); i >= 0 {
+	// used". Semicolons in comments or quoted strings are not separators.
+	if i := lastDateSeparator(value); i >= 0 {
 		return parseDateHeader(value[i+1:])
 	}
 
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", value)
+}
+
+// lastDateSeparator returns the last semicolon outside comments and quoted
+// strings. Both may contain quoted-pairs, and comments may nest. The suffix
+// after a separator is parsed as a complete date-time, including trailing CFWS.
+func lastDateSeparator(value string) int {
+	last, depth := -1, 0
+	quoted := false
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c == '\\' && (quoted || depth > 0) {
+			i++ // a quoted-pair cannot open or close either construct
+			continue
+		}
+		if depth > 0 {
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			continue
+		}
+		if quoted {
+			if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '(':
+			depth = 1
+		case '"':
+			quoted = true
+		case ';':
+			last = i
+		}
+	}
+	return last
 }
 
 // DateTest implements the "date" test from RFC 5260

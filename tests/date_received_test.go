@@ -89,3 +89,25 @@ test "Received without a date-time" {
 }
 `)
 }
+
+func TestDateReceivedCommentSeparator(t *testing.T) {
+	RunDovecotTestInline(t, "", `
+require ["vnd.dovecot.testsuite", "date", "relational", "comparator-i;ascii-numeric"];
+test_set "message" text:
+Received: from "mx;host" (relay; note) by local;
+ Wed, 17 Jul 1996 02:23:25 -0700 (PDT (summer; time))
+Subject: Received comments
+
+Test.
+.
+;
+test "The separator is outside comments" {
+	if not date :count "eq" :comparator "i;ascii-numeric" "received" "year" "1" {
+		test_fail "Received with a semicolon in trailing CFWS was not a date";
+	}
+	if not date :zone "+0000" "received" "time" "09:23:25" {
+		test_fail "wrong Received time";
+	}
+}
+`)
+}
