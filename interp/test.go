@@ -25,6 +25,7 @@ type Test interface {
 
 type AddressTest struct {
 	matcherTest
+	fieldIndex // RFC 5260 §6
 
 	AddressPart    AddressPart
 	AddressPartCnt int // Counter to detect duplicate address parts
@@ -71,49 +72,34 @@ var allowedAddrHeaders = map[string]struct{}{
 }
 
 func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
-	entryCount := uint64(0)
-	if a.mime.enabled {
+	parts, err := a.mime.parts(d)
+	if err != nil {
+		return false, err
+	}
+	names := make([]string, len(a.Header))
+	for i, hdr := range a.Header {
+		names[i] = expandVars(d, strings.ToLower(hdr))
+	}
+	byName, err := a.selectFields(names, func(name string) ([]string, error) {
 		// RFC 5703 §4.2: any MIME header of the parts in scope is parsed as
 		// an address header, so the address-header list does not apply.
-		parts, err := a.mime.scope(d)
-		if err != nil {
-			return false, err
-		}
-		for _, part := range parts {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-			for _, hdr := range a.Header {
-				values, err := part.headerValues(d, expandVars(d, hdr))
-				if err != nil {
-					return false, err
-				}
-				ok, err := a.matchValues(ctx, d, values, &entryCount)
-				if err != nil || ok {
-					return ok, err
-				}
+		if !a.mime.enabled {
+			if _, ok := allowedAddrHeaders[name]; !ok {
+				return nil, nil
 			}
 		}
-		if a.isCount() {
-			return a.countMatches(d, entryCount), nil
-		}
-		return false, nil
+		return headerFields(ctx, d, parts, name)
+	})
+	if err != nil {
+		return false, err
 	}
 
-	for _, hdr := range a.Header {
-		hdr = strings.ToLower(hdr)
-		hdr = expandVars(d, hdr)
-
-		if _, ok := allowedAddrHeaders[hdr]; !ok {
+	entryCount := uint64(0)
+	for _, values := range byName {
+		if a.Index > 0 && len(values) == 0 {
+			// :index selected a field of another header, or none.
 			continue
 		}
-
-		// Use GetHeaderWithEdits to get the current header state including any edits
-		values, err := GetHeaderWithEdits(d, hdr)
-		if err != nil {
-			return false, err
-		}
-
 		ok, err := a.matchValues(ctx, d, values, &entryCount)
 		if err != nil || ok {
 			return ok, err
@@ -411,70 +397,37 @@ func (h HasFlagTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 
 type HeaderTest struct {
 	matcherTest
+	fieldIndex // RFC 5260 §6
 
 	Header []string
 	mime   mimeTestOpts // RFC 5703 §4.1
 }
 
 func (h HeaderTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
-	entryCount := uint64(0)
-	if h.mime.enabled {
-		parts, err := h.mime.scope(d)
-		if err != nil {
-			return false, err
-		}
-		params := expandVarsList(d, h.mime.params)
-		for _, part := range parts {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-			for _, hdr := range h.Header {
-				name := expandVars(d, hdr)
-				raw, err := part.headerValues(d, name)
-				if err != nil {
-					return false, err
-				}
-				values, n := h.mime.values(name, raw, params)
-				if h.isCount() {
-					entryCount += n
-					continue
-				}
-				for _, value := range values {
-					ok, err := h.matcherTest.tryMatch(ctx, d, value)
-					if err != nil {
-						return false, err
-					}
-					if ok {
-						return true, nil
-					}
-				}
-			}
-		}
-		if h.isCount() {
-			return h.countMatches(d, entryCount), nil
-		}
-		return false, nil
+	parts, err := h.mime.parts(d)
+	if err != nil {
+		return false, err
+	}
+	names := expandVarsList(d, h.Header)
+	byName, err := h.selectFields(names, func(name string) ([]string, error) {
+		return headerFields(ctx, d, parts, name)
+	})
+	if err != nil {
+		return false, err
 	}
 
-	for _, hdr := range h.Header {
-		// Use GetHeaderWithEdits to get the current header state including any edits
-		values, err := GetHeaderWithEdits(d, expandVars(d, hdr))
-		if err != nil {
-			return false, err
+	params := expandVarsList(d, h.mime.params)
+	entryCount := uint64(0)
+	for i, raw := range byName {
+		values, n := h.mime.values(names[i], raw, params)
+		if h.isCount() {
+			entryCount += n
+			continue
 		}
-
 		for _, value := range values {
-			if h.isCount() {
-				entryCount++
-				continue
-			}
-
-			ok, err := h.matcherTest.tryMatch(ctx, d, decodeHeaderValue(value))
-			if err != nil {
-				return false, err
-			}
-			if ok {
-				return true, nil
+			ok, err := h.matcherTest.tryMatch(ctx, d, value)
+			if err != nil || ok {
+				return ok, err
 			}
 		}
 	}
@@ -484,6 +437,27 @@ func (h HeaderTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// headerFields returns the fields of header name: the message's (with
+// editheader's changes), or, for a :mime test, those of each part in parts in
+// turn.
+func headerFields(ctx context.Context, d *RuntimeData, parts []*mimePart, name string) ([]string, error) {
+	if parts == nil {
+		return GetHeaderWithEdits(d, name)
+	}
+	var fields []string
+	for _, part := range parts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		values, err := part.headerValues(d, name)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, values...)
+	}
+	return fields, nil
 }
 
 type NotTest struct {

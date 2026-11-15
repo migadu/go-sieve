@@ -42,17 +42,6 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 					zoneCnt++
 				},
 			},
-			"index": {
-				NeedsValue: true,
-				MatchNum: func(val int) {
-					loaded.Index = val
-				},
-			},
-			"last": {
-				MatchBool: func() {
-					loaded.Last = true
-				},
-			},
 		},
 		Pos: []SpecPosArg{
 			{
@@ -77,6 +66,7 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 			},
 		},
 	})
+	loaded.addIndexTags(spec.Tags)
 
 	err := LoadSpec(s, spec, test.Position, test.Args, test.Tests, nil)
 	if err != nil {
@@ -100,12 +90,8 @@ func loadDateTest(s *Script, test parser.Test) (Test, error) {
 		return nil, fmt.Errorf("date: invalid date-part: %s", loaded.DatePart)
 	}
 
-	// Validate :index and :last usage
-	if loaded.Last && loaded.Index == 0 {
-		return nil, fmt.Errorf("date: :last requires :index")
-	}
-	if loaded.Index > 0 && !s.RequiresExtension("index") {
-		return nil, fmt.Errorf("date: missing require 'index' for :index argument")
+	if err := loaded.validateIndex(s, test.Position); err != nil {
+		return nil, err
 	}
 
 	if err := loaded.setKey(s, key); err != nil {
