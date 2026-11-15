@@ -76,18 +76,21 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	names := make([]string, len(a.Header))
-	for i, hdr := range a.Header {
-		names[i] = expandVars(d, strings.ToLower(hdr))
-	}
-	byName, err := a.selectFields(names, func(name string) ([]string, error) {
-		// RFC 5703 §4.2: any MIME header of the parts in scope is parsed as
-		// an address header, so the address-header list does not apply.
+	names := make([]string, 0, len(a.Header))
+	for _, hdr := range a.Header {
+		name := expandVars(d, strings.ToLower(hdr))
+		// A header that is not an address header is skipped: it neither
+		// matches (not even the empty string) nor counts for :index. RFC 5703
+		// §4.2: any MIME header of the parts in scope is parsed as an address
+		// header, so the address-header list does not apply with :mime.
 		if !a.mime.enabled {
 			if _, ok := allowedAddrHeaders[name]; !ok {
-				return nil, nil
+				continue
 			}
 		}
+		names = append(names, name)
+	}
+	byName, err := a.selectFields(names, func(name string) ([]string, error) {
 		return headerFields(ctx, d, parts, name)
 	})
 	if err != nil {
