@@ -174,13 +174,15 @@ func (t *matcherTest) setKey(s *Script, k []string) error {
 	}
 
 	// A :regex key without variables is checked here, so one that does not
-	// compile refuses the script instead of failing its test at every
-	// message. draft-murchison-sieve-regex §3: "Implementations SHOULD reject
-	// regular expressions that are unsupported by this specification as a
-	// syntax error." The key is only checked, as Pigeonhole does, and the
-	// test compiles it when it runs: counted repetition makes a key of
-	// MaxPatternLength bytes compile to tens of megabytes, so compiling and
-	// keeping every key would let one script hold hundreds.
+	// compile, or whose program would be larger than MaxProgramSize, refuses
+	// the script instead of failing its test at every message.
+	// draft-murchison-sieve-regex §3: "Implementations SHOULD reject regular
+	// expressions that are unsupported by this specification as a syntax
+	// error." The key is only checked, as Pigeonhole does, and compiled when
+	// its test runs, once per execution (RuntimeData.regexes): counted
+	// repetition lets a key of a few bytes compile to MaxProgramSize
+	// instructions, so compiling and keeping every key of a script would let
+	// one script hold hundreds of megabytes.
 	if t.match == MatchRegex {
 		for _, key := range t.key {
 			if len(usedVars(s, key)) > 0 {
@@ -248,6 +250,8 @@ func (t *matcherTest) tryMatch(ctx context.Context, d *RuntimeData, source strin
 		)
 		if t.keyCompiled != nil && t.keyCompiled[i] != nil {
 			ok, matches, err = t.keyCompiled[i](ctx, source)
+		} else if t.match == MatchRegex {
+			ok, matches, err = matchRegex(ctx, &d.regexes, t.comparator, expandVars(d, key), source)
 		} else {
 			key = expandVars(d, key)
 			ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, expandVars(d, key))

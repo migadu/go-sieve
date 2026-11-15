@@ -95,6 +95,9 @@ type RuntimeData struct {
 	mimeRoot  *mimePart
 	partStack []*mimePart
 
+	// The :regex keys compiled so far, for the values and tests after.
+	regexes regexCache
+
 	// vnd.dovecot.testsuit state
 	testName        string
 	testFailMessage string // if set - test failed.

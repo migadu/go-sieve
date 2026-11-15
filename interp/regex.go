@@ -17,8 +17,17 @@ type RegexLimits struct {
 	// interrupted mid-call, so this bounds the caller's wait, not the CPU;
 	// MaxInputLength is what actually bounds the work.
 	MaxExecTime time.Duration
-	// MaxPatternLength is the maximum allowed compiled-pattern length.
+	// MaxPatternLength is the maximum length of a pattern, in bytes, as
+	// written.
 	MaxPatternLength int
+	// MaxProgramSize is the maximum size of the program a :regex pattern
+	// compiles to, in instructions, as estimated from the parsed pattern
+	// before it is compiled. Counted repetition multiplies what it repeats,
+	// so without this bound a pattern of MaxPatternLength bytes can compile
+	// to about a million instructions (some 45 MB). A compiled instruction
+	// keeps about 50 bytes, and a character class counts one instruction
+	// more for every 8 range ends it holds (see programSize).
+	MaxProgramSize int
 	// MaxInputLength is the maximum input length fed to the matcher. Longer
 	// input is truncated to this length before matching (safe degradation,
 	// rather than failing the whole script).
@@ -30,6 +39,7 @@ type RegexLimits struct {
 var DefaultRegexLimits = RegexLimits{
 	MaxExecTime:      100 * time.Millisecond,
 	MaxPatternLength: 1000,
+	MaxProgramSize:   10000,
 	MaxInputLength:   256 * 1024,
 }
 
@@ -43,6 +53,9 @@ func EffectiveRegexLimits(l RegexLimits) RegexLimits {
 	if l.MaxPatternLength <= 0 {
 		l.MaxPatternLength = DefaultRegexLimits.MaxPatternLength
 	}
+	if l.MaxProgramSize <= 0 {
+		l.MaxProgramSize = DefaultRegexLimits.MaxProgramSize
+	}
 	if l.MaxInputLength <= 0 {
 		l.MaxInputLength = DefaultRegexLimits.MaxInputLength
 	}
@@ -55,7 +68,8 @@ type regexLimitsCtxKey struct{}
 // matches executed under it. Script.Execute installs the script's effective limits
 // here so a single match's input truncation (MaxInputLength) and soft execution wait
 // (MaxExecTime) are configurable per execution rather than fixed at the package
-// default. MaxPatternLength is a compile-time bound and is not read from the context.
+// default. MaxPatternLength and MaxProgramSize are compile-time bounds and are not
+// read from the context.
 func ContextWithRegexLimits(ctx context.Context, limits RegexLimits) context.Context {
 	return context.WithValue(ctx, regexLimitsCtxKey{}, limits)
 }
@@ -85,38 +99,120 @@ type SafeRegexMatcher struct {
 	find    findSubmatchFunc
 	pattern string
 	limits  RegexLimits
+	// size is the estimated size of the compiled program, in instructions
+	// (programSize); 0 for the binaryregexp :matches path.
+	size       int
+	cacheBytes int // conservative retained cache charge; no parsed tree is kept
 }
 
 // CompileSafeRegex compiles a pattern with the stdlib regexp engine
 // (Unicode-aware) and applies the supplied safety limits. Used for the :regex
 // match type and the Unicode :matches path.
 func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, error) {
-	if len(pattern) > limits.MaxPatternLength {
-		return nil, fmt.Errorf("regex pattern too long: %d > %d", len(pattern), limits.MaxPatternLength)
+	parsed, size, err := parseSafeRegex(pattern, limits)
+	if err != nil {
+		return nil, err
 	}
-	// The key's byte length is bounded, but counted repetition can still expand
-	// its compiled program substantially. The matching input and soft-wait limits
-	// below do not bound this inherited compilation cost.
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits}, nil
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheCost(pattern, pattern, parsed)}, nil
 }
 
 // checkRegex returns the error CompileSafeRegex returns for pattern under
-// limits, without compiling it. regexp.Compile refuses only what
-// syntax.Parse refuses with the Perl flags, and parsing does not expand
-// counted repetition, so the check stays cheap for a key whose compiled
-// program would be large.
+// limits, without compiling it: regexp.Compile refuses only what
+// syntax.Parse refuses with the Perl flags.
 func checkRegex(pattern string, limits RegexLimits) error {
+	_, _, err := parseSafeRegex(pattern, limits)
+	return err
+}
+
+// parseSafeRegex parses pattern as regexp.Compile does and refuses it when it
+// is longer than MaxPatternLength or when the program it compiles to would
+// be larger than MaxProgramSize (0 for the default). Parsing does not expand
+// counted repetition, so the refusal costs no more than the pattern's length,
+// however large its program would be. It returns the parsed pattern and the
+// estimated size of its program.
+func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, error) {
 	if len(pattern) > limits.MaxPatternLength {
-		return fmt.Errorf("regex pattern too long: %d > %d", len(pattern), limits.MaxPatternLength)
+		return nil, 0, fmt.Errorf("regex pattern too long: %d > %d", len(pattern), limits.MaxPatternLength)
 	}
-	if _, err := syntax.Parse(pattern, syntax.Perl); err != nil {
-		return fmt.Errorf("regex compile error: %w", err)
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil, 0, fmt.Errorf("regex compile error: %w", err)
 	}
-	return nil
+	maxSize := limits.MaxProgramSize
+	if maxSize <= 0 {
+		maxSize = DefaultRegexLimits.MaxProgramSize
+	}
+	size := programSize(re)
+	if size <= maxSize {
+		// The casemap comparators compile the pattern case-insensitive,
+		// which adds the other case of each letter to a class: [A-Z] holds
+		// 2 range ends, folded 8, and a range of Latin-1 and Latin
+		// Extended-A letters folds to some 50. The bound is checked on both,
+		// so that it is the same under every comparator.
+		if folded, err := syntax.Parse(pattern, syntax.Perl|syntax.FoldCase); err == nil {
+			if foldedSize := programSize(folded); foldedSize > size {
+				size = foldedSize
+			}
+		}
+	}
+	if size > maxSize {
+		return nil, 0, fmt.Errorf("regex too complex: compiles to about %d instructions > %d", size, maxSize)
+	}
+	return re, size, nil
+}
+
+// programSize estimates the number of instructions re compiles to, as
+// regexp/syntax estimates it for its own limit of some 3 million
+// (parser.calcSize): counted repetition multiplies the size of what it
+// repeats. The parser refuses repetition nested to more than 1000 copies of
+// what it repeats, and a tree deeper than 1000, so neither the size nor the
+// recursion can grow out of bounds.
+//
+// It also counts what a character class keeps, which regexp/syntax does not:
+// regexp compiles a program of under 1000 instructions that is anchored at
+// both ends to a one-pass program as well, which copies the class into every
+// instruction that matches it, some 6 bytes per range end. So a class counts
+// one instruction more for every 8 range ends: \pL holds 1318, and ^\pL{990}$
+// keeps some 8 MB, as much as 160000 instructions do.
+func programSize(re *syntax.Regexp) int {
+	size := 0
+	switch re.Op {
+	case syntax.OpLiteral:
+		size = len(re.Rune)
+	case syntax.OpCharClass:
+		size = 1 + len(re.Rune)/8
+	case syntax.OpCapture, syntax.OpStar:
+		size = 2 + programSize(re.Sub[0])
+	case syntax.OpPlus, syntax.OpQuest:
+		size = 1 + programSize(re.Sub[0])
+	case syntax.OpConcat:
+		for _, sub := range re.Sub {
+			size += programSize(sub)
+		}
+	case syntax.OpAlternate:
+		for _, sub := range re.Sub {
+			size += programSize(sub)
+		}
+		size += len(re.Sub) - 1
+	case syntax.OpRepeat:
+		sub := programSize(re.Sub[0])
+		switch {
+		case re.Max == -1 && re.Min == 0:
+			size = 2 + sub // x*
+		case re.Max == -1:
+			size = 1 + re.Min*sub // xx+
+		default:
+			size = re.Max*sub + re.Max - re.Min // x{2,5} = xx(x(x(x)?)?)?
+		}
+	}
+	if size < 1 {
+		size = 1
+	}
+	return size
 }
 
 // compileSafeBinaryRegex compiles a pattern with the binaryregexp engine
