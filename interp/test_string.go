@@ -288,14 +288,12 @@ func matchRegex(ctx context.Context, regexes *regexCache, comparator Comparator,
 	return matches != nil, matches, nil
 }
 
-// regexCacheMaxKeys and regexCacheMaxSize bound the :regex keys one execution
-// keeps compiled: at most 100000 instructions, 1000 keys and 8 MiB of
-// conservative storage charges, including Unicode character-class rune tables.
-// These are retention budgets; an uncached key still compiles and matches.
+// regexCacheMaxKeys and regexCacheMaxSize bound retention to 1000 keys and
+// 100000 weighted program-cost units, including character-class ranges. These
+// are cost budgets, not an exact heap cap; uncached keys still compile and match.
 const (
-	regexCacheMaxKeys  = 1000
-	regexCacheMaxSize  = 100000
-	regexCacheMaxBytes = 8 * 1024 * 1024
+	regexCacheMaxKeys = 1000
+	regexCacheMaxSize = 100000
 )
 
 type regexCacheKey struct {
@@ -312,7 +310,6 @@ type regexCacheKey struct {
 type regexCache struct {
 	matchers map[regexCacheKey]*SafeRegexMatcher
 	size     int
-	bytes    int
 }
 
 func (c *regexCache) compile(pattern string, comparator Comparator) (*SafeRegexMatcher, error) {
@@ -327,13 +324,12 @@ func (c *regexCache) compile(pattern string, comparator Comparator) (*SafeRegexM
 	if err != nil {
 		return nil, err
 	}
-	if len(c.matchers) < regexCacheMaxKeys && c.size+matcher.size <= regexCacheMaxSize && matcher.cacheBytes <= regexCacheMaxBytes-c.bytes {
+	if len(c.matchers) < regexCacheMaxKeys && c.size+matcher.size <= regexCacheMaxSize {
 		if c.matchers == nil {
 			c.matchers = make(map[regexCacheKey]*SafeRegexMatcher)
 		}
 		c.matchers[key] = matcher
 		c.size += matcher.size
-		c.bytes += matcher.cacheBytes
 	}
 	return matcher, nil
 }

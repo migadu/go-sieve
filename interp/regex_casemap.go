@@ -14,8 +14,9 @@ import (
 // the value's own text, and the casemap comparators make the pattern itself
 // case-insensitive, as Pigeonhole compiles it with REG_ICASE (mcht-regex.c):
 // i;ascii-casemap for ASCII letters only (RFC 4790 §9.2.1), i;unicode-casemap
-// for every letter. The limits and any error are about the key as written:
-// folding the case of a letter does not change the size of the program.
+// for every letter. The limits and any error are about the key as written,
+// whose size parseSafeRegex estimates with its classes folded as well, so the
+// bound is the same under every comparator.
 func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimits) (*SafeRegexMatcher, error) {
 	if comparator != ComparatorASCIICaseMap && comparator != ComparatorUnicodeCaseMap {
 		return CompileSafeRegex(pattern, limits)
@@ -30,17 +31,11 @@ func compileSafeRegexFor(pattern string, comparator Comparator, limits RegexLimi
 			return nil, fmt.Errorf("regex compile error: %w", err)
 		}
 	}
-	// Case folding may enlarge character classes without adding instructions.
-	// Account for the expression actually compiled when retaining its matcher.
-	folded, err := syntax.Parse(expr, syntax.Perl)
-	if err != nil {
-		return nil, fmt.Errorf("regex compile error: %w", err)
-	}
 	re, err := regexp.Compile(expr)
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheBytes(folded, size, len(expr))}, nil
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size}, nil
 }
 
 // foldASCIICase rewrites pattern, parsed as parsed, so that each ASCII letter

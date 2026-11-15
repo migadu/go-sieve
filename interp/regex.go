@@ -20,12 +20,13 @@ type RegexLimits struct {
 	// MaxPatternLength is the maximum length of a pattern, in bytes, as
 	// written.
 	MaxPatternLength int
-	// MaxProgramSize is the maximum size of the program a :regex pattern
-	// compiles to, in instructions, as estimated from the parsed pattern
+	// MaxProgramSize bounds a :regex pattern in weighted program-cost units:
+	// instructions plus a character-class range allowance, estimated from the parsed pattern
 	// before it is compiled. Counted repetition multiplies what it repeats,
 	// so without this bound a pattern of MaxPatternLength bytes can compile
 	// to about a million instructions (some 45 MB). A compiled instruction
-	// keeps about 50 bytes, plus variable-length character-class rune tables.
+	// keeps about 50 bytes, and a character class counts one instruction
+	// more for every 8 range ends it holds (see programSize).
 	MaxProgramSize int
 	// MaxInputLength is the maximum input length fed to the matcher. Longer
 	// input is truncated to this length before matching (safe degradation,
@@ -98,19 +99,16 @@ type SafeRegexMatcher struct {
 	find    findSubmatchFunc
 	pattern string
 	limits  RegexLimits
-	// size is the estimated size of the compiled program, in instructions
-	// (programSize); 0 for the binaryregexp :matches path.
+	// size is the estimated program cost from programSize, including character
+	// classes; 0 for the binaryregexp :matches path.
 	size int
-	// cacheBytes conservatively accounts for instructions, rune tables and
-	// per-key storage. It is separate from the accepted program-size limit.
-	cacheBytes int
 }
 
 // CompileSafeRegex compiles a pattern with the stdlib regexp engine
 // (Unicode-aware) and applies the supplied safety limits. Used for the :regex
 // match type and the Unicode :matches path.
 func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, error) {
-	parsed, size, err := parseSafeRegex(pattern, limits)
+	_, size, err := parseSafeRegex(pattern, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -118,37 +116,7 @@ func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, er
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
 	}
-	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size, cacheBytes: regexCacheBytes(parsed, size, len(pattern))}, nil
-}
-
-// regexCacheBytes conservatively charges every instruction for the largest
-// rune table in the compiled expression. This intentionally overcounts shared
-// tables and literals: Unicode classes can otherwise retain many kilobytes per
-// instruction. The fixed allowance covers the regexp, key, captures and map
-// entry; expression storage and instruction slice capacity are also allowed for.
-// Costs saturate above the budget, avoiding overflow even with custom limits.
-func regexCacheBytes(re *syntax.Regexp, size, exprLen int) int {
-	const fixed = 4096
-	maxRunes := 4 // literals, case-fold cycles and any-character instructions
-	var visit func(*syntax.Regexp)
-	visit = func(re *syntax.Regexp) {
-		if re.Op == syntax.OpCharClass && len(re.Rune) > maxRunes {
-			maxRunes = len(re.Rune)
-		}
-		for _, sub := range re.Sub {
-			visit(sub)
-		}
-	}
-	visit(re)
-	if exprLen > (regexCacheMaxBytes-fixed)/2 || maxRunes > regexCacheMaxBytes/8 {
-		return regexCacheMaxBytes + 1
-	}
-	base := fixed + 2*exprLen
-	perInst := 128 + 8*maxRunes
-	if size > (regexCacheMaxBytes-base)/perInst-2 {
-		return regexCacheMaxBytes + 1
-	}
-	return base + (size+2)*perInst
+	return &SafeRegexMatcher{find: re.FindStringSubmatch, pattern: pattern, limits: limits, size: size}, nil
 }
 
 // checkRegex returns the error CompileSafeRegex returns for pattern under
@@ -178,6 +146,18 @@ func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, er
 		maxSize = DefaultRegexLimits.MaxProgramSize
 	}
 	size := programSize(re)
+	if size <= maxSize {
+		// The casemap comparators compile the pattern case-insensitive,
+		// which adds the other case of each letter to a class: [A-Z] holds
+		// 2 range ends, folded 8, and a range of Latin-1 and Latin
+		// Extended-A letters folds to some 50. The bound is checked on both,
+		// so that it is the same under every comparator.
+		if folded, err := syntax.Parse(pattern, syntax.Perl|syntax.FoldCase); err == nil {
+			if foldedSize := programSize(folded); foldedSize > size {
+				size = foldedSize
+			}
+		}
+	}
 	if size > maxSize {
 		return nil, 0, fmt.Errorf("regex too complex: compiles to about %d instructions > %d", size, maxSize)
 	}
@@ -190,11 +170,20 @@ func parseSafeRegex(pattern string, limits RegexLimits) (*syntax.Regexp, int, er
 // repeats. The parser refuses repetition nested to more than 1000 copies of
 // what it repeats, and a tree deeper than 1000, so neither the size nor the
 // recursion can grow out of bounds.
+//
+// It also counts what a character class keeps, which regexp/syntax does not:
+// regexp compiles a program of under 1000 instructions that is anchored at
+// both ends to a one-pass program as well, which copies the class into every
+// instruction that matches it, some 6 bytes per range end. So a class counts
+// one instruction more for every 8 range ends: \pL holds 1318, and ^\pL{990}$
+// keeps some 8 MB, as much as 160000 instructions do.
 func programSize(re *syntax.Regexp) int {
 	size := 0
 	switch re.Op {
 	case syntax.OpLiteral:
 		size = len(re.Rune)
+	case syntax.OpCharClass:
+		size = 1 + len(re.Rune)/8
 	case syntax.OpCapture, syntax.OpStar:
 		size = 2 + programSize(re.Sub[0])
 	case syntax.OpPlus, syntax.OpQuest:
