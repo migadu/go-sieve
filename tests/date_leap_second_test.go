@@ -57,7 +57,7 @@ test "Leap second in +0100" {
 	if not date :originalzone "date" "zone" "+0100" {
 		test_fail "original zone is not +0100";
 	}
-	if not date :zone "+0000" "date" "iso8601" "2016-12-31T23:59:59+00:00" {
+	if not date :zone "+0000" "date" "iso8601" "2016-12-31T23:59:59Z" {
 		test_fail "leap second in +0100 not 2016-12-31T23:59:59 UTC";
 	}
 }
