@@ -318,6 +318,11 @@ type CurrentDateTest struct {
 }
 
 func (c CurrentDateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
+	// RFC 5260 §5: "The :count value of a currentdate test is always 1."
+	if c.isCount() {
+		return c.countMatches(rd, 1), nil
+	}
+
 	// Get current time
 	t := time.Now()
 
