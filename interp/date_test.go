@@ -115,3 +115,66 @@ func TestParseDateHeaderPreservesParserExtensions(t *testing.T) {
 		}
 	}
 }
+
+// The date-time of a Received: field is the text after its last semicolon (RFC
+// 5260 §4: "Implementations MUST support extraction of RFC 2822 date-time
+// information that either makes up the entire header field ... or appears at
+// the end of a header field following a semicolon"), and with more than one
+// date-time "the last one that appears SHOULD be used". A value that is a
+// date-time as a whole is still read whole, even with a semicolon in a comment.
+func TestParseDateHeaderReceived(t *testing.T) {
+	const h = 3600
+	cases := []struct {
+		value  string
+		wall   time.Time // the date and time as written, in UTC
+		offset int       // seconds east of UTC
+	}{
+		{"from mx.example.org by mail.example.com; Wed, 17 Jul 1996 02:23:25 -0700",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		{"from mx.example.org (mx.example.org [192.0.2.1])\r\n\tby mail.example.com (Postfix) with ESMTPS id 4ABC\r\n\tfor <user@example.com>; Wed, 17 Jul 1996 02:23:25 -0700 (PDT)",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		{"from mx.example.org by mail.example.com;\r\n Wed, 17 Jul 1996 02:23:25 +0200",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 2 * h},
+		{"by mail.example.com;Wed, 17 Jul 1996 02:23:25 -0700",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		{"from [2001:db8::1] by mail.example.com; 17 Jul 96 02:23 PDT",
+			time.Date(1996, 7, 17, 2, 23, 0, 0, time.UTC), -7 * h},
+		{"from mx.example.org (helo; x) by mail.example.com; Wed, 17 Jul 1996 02:23:25 -0700",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		// More than one date-time: the last one.
+		{"by mail.example.com; Tue, 16 Jul 1996 01:00:00 +0000; Wed, 17 Jul 1996 02:23:25 -0700",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		// A whole date-time with a semicolon in a comment.
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (PDT; summer)",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (resent; Thu, 18 Jul 1996 02:23:25 +0000)",
+			time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
+	}
+	for _, tc := range cases {
+		got, err := parseDateHeader(tc.value)
+		if err != nil {
+			t.Errorf("%q: %v", tc.value, err)
+			continue
+		}
+		want := tc.wall.Add(-time.Duration(tc.offset) * time.Second)
+		if !got.Equal(want) {
+			t.Errorf("%q: %v, want %v", tc.value, got, want.In(time.FixedZone("", tc.offset)))
+		}
+		if _, offset := got.Zone(); offset != tc.offset {
+			t.Errorf("%q: zone offset of %v is %d, want %d", tc.value, got, offset, tc.offset)
+		}
+	}
+
+	// No date-time after the last semicolon is still an error.
+	for _, value := range []string{
+		"from mx.example.org by mail.example.com;",
+		"from mx.example.org by mail.example.com; ",
+		"from mx.example.org by mail.example.com; id 4ABC",
+		"by mail.example.com; Wed, 17 Jul 1996 02:23:25 -0700; id 4ABC",
+		";",
+	} {
+		if got, err := parseDateHeader(value); err == nil {
+			t.Errorf("%q parsed as %v", value, got)
+		}
+	}
+}
