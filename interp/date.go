@@ -256,8 +256,9 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 	return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 }
 
-// parseDateHeader parses a date from a header value
-// It supports various common date formats
+// parseDateHeader parses the date-time of a header value: the whole value, as
+// in a Date: field, or else the text after its last semicolon, as in a
+// Received: field. It supports various common date formats.
 func parseDateHeader(value string) (time.Time, error) {
 	parsed, err := parseHeaderDate(value)
 	return parsed.Time, err
@@ -300,7 +301,56 @@ func parseHeaderDate(value string) (parsedHeaderDate, error) {
 		}
 	}
 
+	// RFC 5260 section 4 permits the date-time after a semicolon, as in
+	// Received. The suffix has no further unquoted separator, so this recurses once.
+	if i := lastDateSeparator(value); i >= 0 {
+		return parseHeaderDate(value[i+1:])
+	}
 	return parsedHeaderDate{}, fmt.Errorf("unable to parse date: %s", value)
+}
+
+// lastDateSeparator finds a field separator outside quoted strings and nested
+// comments. Semicolons and parentheses in quoted-pairs do not change that state.
+// This is a single pass with constant auxiliary space.
+func lastDateSeparator(value string) int {
+	last, depth := -1, 0
+	quoted, escaped := false, false
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if depth > 0 {
+			switch c {
+			case '\\':
+				escaped = true
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			continue
+		}
+		if quoted {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '(':
+			depth = 1
+		case '"':
+			quoted = true
+		case ';':
+			last = i
+		}
+	}
+	return last
 }
 
 // DateTest implements the "date" test from RFC 5260
