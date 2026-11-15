@@ -102,10 +102,6 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 
 	entryCount := uint64(0)
 	for _, values := range byName {
-		if a.Index > 0 && len(values) == 0 {
-			// :index selected a field of another header, or none.
-			continue
-		}
 		ok, err := a.matchValues(ctx, d, values, &entryCount)
 		if err != nil || ok {
 			return ok, err
@@ -120,19 +116,10 @@ func (a AddressTest) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 }
 
 // matchValues tests one header's values. In :count mode it adds the addresses
-// found to *entryCount instead of matching.
+// found to *entryCount instead of matching. A header the message does not have
+// has no values, so it matches no key, not even the empty one (RFC 5228 §5.1,
+// §5.7); a field that is present but empty is one empty value.
 func (a AddressTest) matchValues(ctx context.Context, d *RuntimeData, values []string, entryCount *uint64) (bool, error) {
-	// Handle case where header exists but has no values (empty header)
-	if len(values) == 0 {
-		if a.isCount() {
-			// No addresses to count for this header
-			return false, nil
-		}
-
-		// Try to match against empty string for empty header
-		return testAddress(ctx, d, a.matcherTest, a.AddressPart, "")
-	}
-
 	for _, value := range values {
 		// Strip RFC 2822 comments before parsing
 		cleanValue := stripRFC2822Comments(value)
