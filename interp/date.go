@@ -208,6 +208,8 @@ var obsYear = regexp.MustCompile(`^[^:]*[ \t](\d{2,3})[ \t]+\d{1,2}:`)
 // after 1999). §4.3 adds 2000 to a two-digit year from 00 to 49, and 1900 to
 // one from 50 to 99 "or any three digit year", so the year is written out in
 // four digits before parsing.
+// Comments and folding white space are reduced to separators before leap-second
+// and obsolete-year normalization, so those rewrites see the actual time tokens.
 func parseRFC5322Date(value string) (time.Time, error) {
 	parsed, err := parseRFC5322DateValue(value)
 	return parsed.Time, err
@@ -221,6 +223,7 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 		t, err := mail.ParseDate(value)
 		return parsedHeaderDate{Time: t}, err
 	}
+	unfolded = normalizeCFWS(unfolded)
 	isLeapSecond := false
 	if m := leapSecond.FindStringSubmatchIndex(unfolded); m != nil {
 		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
@@ -245,6 +248,13 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 			t, err := mail.ParseDate(unfolded)
 			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
 		}
+		// Nor are the letters the zone when a numeric offset follows them after
+		// white space or a comment: RFC 5322 section 3.3 has one zone after
+		// the time of day, and net/mail would discard the extra offset.
+		if rest := strings.TrimLeft(unfolded[end:], " \t"); rest != "" && (rest[0] == '+' || rest[0] == '-') {
+			t, err := mail.ParseDate(unfolded)
+			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
+		}
 		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
 		if !ok {
 			zone = "-0000"
@@ -254,6 +264,73 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 	}
 	t, err := mail.ParseDate(unfolded)
 	return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
+}
+
+// normalizeCFWS returns an unfolded date-time with every comment (RFC 5322
+// §3.2.2) and run of white space between two tokens written as one space, as
+// net/mail's layouts separate tokens, except that there is none before the
+// comma after the day name or around a colon between the digits of the time
+// of day, and always one after that comma: day = ([FWS] 1*2DIGIT FWS) makes it
+// optional (§3.3). A date-time has no quoted strings, so every "(" opens a
+// comment; the rest of the value from one that does not close is left as
+// written, for net/mail to reject.
+func normalizeCFWS(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	var prev byte   // the last byte written
+	sep := false    // white space or a comment since prev
+	digits := false // a digit was written: the day-of-week is behind
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' {
+			sep = true
+			continue
+		}
+		if c == '(' {
+			if n := commentLen(s[i:]); n > 0 {
+				i += n - 1
+				sep = true
+				continue
+			}
+		}
+		dayComma := c == ',' && !digits
+		timeColon := c == ':' && isDigit(prev) || prev == ':' && isDigit(c)
+		if sep && prev != 0 && !dayComma && !timeColon {
+			b.WriteByte(' ')
+		}
+		if c == '(' {
+			b.WriteString(s[i:])
+			break
+		}
+		b.WriteByte(c)
+		prev, sep, digits = c, dayComma, digits || isDigit(c)
+	}
+	return b.String()
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// commentLen returns the length of the comment s starts with, nested comments
+// and quoted-pairs included (RFC 5322 §3.2.2), or 0 if it is malformed or
+// does not close. An unquoted NUL is not ctext, including obsolete ctext;
+// a quoted NUL remains allowed by obs-qp (§4.1).
+func commentLen(s string) int {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case 0:
+			return 0
+		case '\\':
+			i++
+		case '(':
+			depth++
+		case ')':
+			if depth--; depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return 0
 }
 
 // parseDateHeader parses the date-time of a header value: the whole value, as
