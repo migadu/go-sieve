@@ -27,16 +27,14 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 	}
 	d.MailboxFlags[mailbox] = copyFlags(d, c.Flags)
 
-	found := false
-	for _, m := range d.Mailboxes {
-		if m == mailbox {
-			found = true
-		}
+	// A fileinto naming a mailbox already filed into is performed all the same,
+	// so its :create and its cancelling of the implicit keep apply; only the
+	// message is not stored there twice (RFC 5228 §2.10.3).
+
+	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
+	if !c.Copy {
+		d.ImplicitKeep = false
 	}
-	if found {
-		return nil
-	}
-	d.Mailboxes = append(d.Mailboxes, mailbox)
 
 	// RFC 5490: Track mailboxes that should be created
 	if c.Create {
@@ -52,10 +50,12 @@ func (c CmdFileInto) Execute(_ context.Context, d *RuntimeData) error {
 		}
 	}
 
-	// RFC3894: If :copy is specified, do not set ImplicitKeep to false
-	if !c.Copy {
-		d.ImplicitKeep = false
+	for _, m := range d.Mailboxes {
+		if m == mailbox {
+			return nil
+		}
 	}
+	d.Mailboxes = append(d.Mailboxes, mailbox)
 	return nil
 }
 
