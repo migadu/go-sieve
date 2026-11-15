@@ -105,30 +105,50 @@ func modifiedJulianDay(t time.Time) int {
 	return jdn - 2400001
 }
 
-// parseZoneOffset parses a zone offset string like "+0500" or "-0800" and returns the offset in seconds
+// parseZoneOffset parses a time-zone of RFC 5260 §4.1, ( "+" / "-" ) 4DIGIT
+// like "+0500" or "-0800", and returns the offset in seconds.
 func parseZoneOffset(zone string) (int, error) {
-	if len(zone) != 5 {
+	if len(zone) != 5 || (zone[0] != '+' && zone[0] != '-') {
 		return 0, fmt.Errorf("invalid zone format: %s", zone)
 	}
+	for _, c := range zone[1:] {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid zone format: %s", zone)
+		}
+	}
 
-	sign := 1
+	hours := int(zone[1]-'0')*10 + int(zone[2]-'0')
+	minutes := int(zone[3]-'0')*10 + int(zone[4]-'0')
+	offset := hours*3600 + minutes*60
 	if zone[0] == '-' {
-		sign = -1
-	} else if zone[0] != '+' {
-		return 0, fmt.Errorf("invalid zone format: %s", zone)
+		offset = -offset
 	}
+	return offset, nil
+}
 
-	hours, err := strconv.Atoi(zone[1:3])
-	if err != nil {
-		return 0, fmt.Errorf("invalid zone hours: %s", zone)
+// zoneLocation returns the time zone a :zone argument names once its
+// variables are expanded (RFC 5229 §3). An empty zone is the local one (RFC
+// 5260 §4.1: "If both the :zone and :originalzone arguments are omitted, the
+// local time zone MUST be used."), and so, as in Pigeonhole, is an expanded
+// one that is not a time-zone: a literal one was refused when the script
+// loaded.
+func zoneLocation(rd *RuntimeData, zone string) *time.Location {
+	if zone != "" {
+		if offset, err := parseZoneOffset(expandVars(rd, zone)); err == nil {
+			return time.FixedZone("", offset)
+		}
 	}
+	return time.Local
+}
 
-	minutes, err := strconv.Atoi(zone[3:5])
-	if err != nil {
-		return 0, fmt.Errorf("invalid zone minutes: %s", zone)
-	}
-
-	return sign * (hours*3600 + minutes*60), nil
+// expandDatePart expands the variables of a date-part (RFC 5229 §3) and
+// reports whether the result is a known date-part. Only a literal one was
+// checked when the script loaded; as in Pigeonhole, an unknown expanded one
+// makes the test false.
+func expandDatePart(rd *RuntimeData, part DatePart) (DatePart, bool) {
+	part = DatePart(strings.ToLower(expandVars(rd, string(part))))
+	_, ok := ValidDateParts[part]
+	return part, ok
 }
 
 // obsZones maps the obsolete alphabetic zones RFC 5322 §4.3 gives a meaning to
@@ -240,6 +260,10 @@ type DateTest struct {
 }
 
 func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
+	datePart, ok := expandDatePart(rd, d.DatePart)
+	if !ok {
+		return false, nil
+	}
 	header := expandVars(rd, d.Header)
 
 	index := fieldIndex{Index: d.Index, Last: d.Last}
@@ -275,10 +299,9 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	}
 
 	// Apply zone transformation
-	t = d.applyZone(t)
+	t = d.applyZone(rd, t)
 
 	// Extract the date part
-	datePart := DatePart(strings.ToLower(expandVars(rd, string(d.DatePart))))
 	partValue, err := extractDatePart(t, datePart)
 	if err != nil {
 		return false, err
@@ -288,23 +311,12 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	return d.matcherTest.tryMatch(ctx, rd, partValue)
 }
 
-func (d DateTest) applyZone(t time.Time) time.Time {
+func (d DateTest) applyZone(rd *RuntimeData, t time.Time) time.Time {
 	if d.OriginalZone {
 		// Keep the original zone
 		return t
 	}
-
-	if d.Zone != "" {
-		// Apply specified zone
-		offset, err := parseZoneOffset(d.Zone)
-		if err == nil {
-			loc := time.FixedZone("", offset)
-			return t.In(loc)
-		}
-	}
-
-	// Default: use local time zone
-	return t.Local()
+	return t.In(zoneLocation(rd, d.Zone))
 }
 
 // CurrentDateTest implements the "currentdate" test from RFC 5260
@@ -317,21 +329,15 @@ type CurrentDateTest struct {
 }
 
 func (c CurrentDateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
-	// Get current time
-	t := time.Now()
-
-	// Apply zone transformation
-	if c.Zone != "" {
-		offset, err := parseZoneOffset(c.Zone)
-		if err == nil {
-			loc := time.FixedZone("", offset)
-			t = t.In(loc)
-		}
+	datePart, ok := expandDatePart(rd, c.DatePart)
+	if !ok {
+		return false, nil
 	}
-	// If no zone specified, use local time (which is what time.Now() returns)
+
+	// The current time, in the :zone or the local zone
+	t := time.Now().In(zoneLocation(rd, c.Zone))
 
 	// Extract the date part
-	datePart := DatePart(strings.ToLower(expandVars(rd, string(c.DatePart))))
 	partValue, err := extractDatePart(t, datePart)
 	if err != nil {
 		return false, err
