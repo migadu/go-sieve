@@ -117,3 +117,45 @@ func TestTaggedArgumentsBeforePositional(t *testing.T) {
 		}
 	}
 }
+
+// RFC 5293 §5: "If no value-patterns are specified, then the comparator and
+// match-type options are silently ignored." An option that is wrong in itself
+// is still an error (an unrequired comparator, :value without relational), as
+// in Pigeonhole, but how the comparator fits the match type is checked only
+// against value patterns.
+func TestDeleteheaderWithoutValuePatternsIgnoresMatchOptions(t *testing.T) {
+	refused := []struct {
+		name    string
+		script  string
+		wantErr string
+	}{
+		{"unrequired comparator", `require "editheader"; deleteheader :comparator "i;ascii-numeric" "X-Count";`, `comparator-i;ascii-numeric`},
+		{"unknown comparator", `require "editheader"; deleteheader :comparator "i;bogus" "X-Count";`, `unsupported comparator`},
+		{":value without relational", `require "editheader"; deleteheader :value "eq" "X-Count";`, `missing require 'relational'`},
+		{"unknown relational operator", `require ["editheader", "relational"]; deleteheader :value "xx" "X-Count";`, `unknown relational operator`},
+		{"two match types", `require "editheader"; deleteheader :is :contains "X-Count";`, `multiple match-types`},
+		{"numeric :contains with value patterns", `require ["editheader", "comparator-i;ascii-numeric"]; deleteheader :comparator "i;ascii-numeric" :contains "X-Count" "1";`, `numeric comparator`},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			err := loadWithArgumentRulesExtensions(tc.script)
+			if err == nil {
+				t.Fatal("load succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	accepted := []string{
+		`require ["editheader", "comparator-i;ascii-numeric"]; deleteheader :comparator "i;ascii-numeric" :contains "X-Count";`,
+		`require ["editheader", "comparator-i;ascii-numeric"]; deleteheader :comparator "i;ascii-numeric" :matches "X-Count";`,
+		`require "editheader"; deleteheader :matches "X-Count";`,
+	}
+	for _, script := range accepted {
+		if err := loadWithArgumentRulesExtensions(script); err != nil {
+			t.Errorf("%s: %v", script, err)
+		}
+	}
+}
