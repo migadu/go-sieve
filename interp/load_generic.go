@@ -47,6 +47,7 @@ type Spec struct {
 func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg, tests []parser.Test, block []parser.Cmd) error {
 	var lastTag *SpecTag
 	nextPosArg := 0
+	seenTags := map[string]bool{}
 	for _, a := range args {
 		switch a := a.(type) {
 		case parser.StringArg:
@@ -204,6 +205,14 @@ func LoadSpec(s *Script, spec *Spec, position lexer.Position, args []parser.Arg,
 			if !ok {
 				return lexer.ErrorAt(a, "LoadSpec: unknown tagged argument: %v", a.Value)
 			}
+			// RFC 5228 §2.6: "It is an error for a script, on a single
+			// command, [...] to use a tagged or optional argument more
+			// than once." Tags are case-insensitive (§8.1).
+			name := strings.ToLower(a.Value)
+			if seenTags[name] {
+				return lexer.ErrorAt(a, "LoadSpec: tagged argument :%s given more than once", a.Value)
+			}
+			seenTags[name] = true
 			if tag.NeedsValue {
 				lastTag = &tag
 			} else {
