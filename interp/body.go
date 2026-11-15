@@ -59,6 +59,10 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		}
 	}
 
+	// RFC 5173 §6: "variable references in the key strings or content type
+	// strings are evaluated as described in this document."
+	contentTypes := expandVarsList(d, t.content)
+
 	count := uint64(0)
 	var walk func(h message.Header, b []byte) (bool, error)
 	walk = func(h message.Header, b []byte) (bool, error) {
@@ -87,8 +91,8 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			if strings.Count(mediaType, "/") == 1 && (strings.HasPrefix(mediaType, "text/") || mediaType == "application/xhtml+xml") {
 				process = true
 			}
-		} else if len(t.content) > 0 {
-			for _, ct := range t.content {
+		} else if len(contentTypes) > 0 {
+			for _, ct := range contentTypes {
 				ct = strings.ToLower(strings.TrimSpace(ct))
 				if ct == "" {
 					process = true
