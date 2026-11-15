@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/migadu/go-sieve/lexer"
 )
@@ -86,6 +87,10 @@ type RuntimeData struct {
 	// The :regex keys compiled so far, for the values and tests after.
 	regexes regexCache
 
+	// currentTime is the instant every currentdate test of this execution
+	// reads, recorded by the first one (see now).
+	currentTime time.Time
+
 	// vnd.dovecot.testsuit state
 	testName        string
 	testFailMessage string // if set - test failed.
@@ -115,6 +120,7 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		Variables:       make(map[string]string, len(d.Variables)),
 		mimeRoot:        d.mimeRoot,
 		partStack:       append([]*mimePart(nil), d.partStack...),
+		currentTime:     d.currentTime,
 		testName:        d.testName,
 		testFailMessage: d.testFailMessage,
 		testFailAt:      d.testFailAt,
@@ -152,6 +158,16 @@ func (d *RuntimeData) Copy() *RuntimeData {
 	}
 
 	return newData
+}
+
+// now returns the current date/time of this execution, recording it on first
+// use. RFC 5260 §5: "All currentdate tests in a single Sieve script MUST refer
+// to the same point in time during execution of the script."
+func (d *RuntimeData) now() time.Time {
+	if d.currentTime.IsZero() {
+		d.currentTime = time.Now()
+	}
+	return d.currentTime
 }
 
 func (d *RuntimeData) MatchVariable(i int) string {
