@@ -169,6 +169,11 @@ var obsZones = map[string]string{
 // of letters that follows it after any folding white space: the zone.
 var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za-z]+)`)
 
+// leapSecond matches a date-time (RFC 5322 §3.3) up to the seconds of its
+// time-of-day (the field's first colon is the one after the hour) when they
+// are 60: a leap second.
+var leapSecond = regexp.MustCompile(`^[^:]*\d:\d{2}:(60)(?:\D|$)`)
+
 // obsYear matches a date-time (RFC 5322 §3.3) up to a year of two or three
 // digits (obs-year, §4.3): the digits right before the hour, which the field's
 // first colon follows.
@@ -192,6 +197,11 @@ var obsYear = regexp.MustCompile(`^[^:]*[ \t](\d{2,3})[ \t]+\d{1,2}:`)
 // one from 50 to 99 "or any three digit year", so the year is written out in
 // four digits before parsing.
 //
+// A time-of-day whose second is 60, a leap second (§3.3: "the time-of-day MUST
+// be in the range 00:00:00 through 23:59:60"), is read as second 59 of the
+// same minute, as Dovecot reads it: time.Time cannot hold second 60, and
+// net/mail.ParseDate does not parse it.
+//
 // net/mail.ParseDate also takes a comment only after the zone, and white space
 // only where its layouts have a space. §4.3 permits comments and folding white
 // space between the tokens (obs-day-of-week, obs-day, obs-year, obs-hour,
@@ -214,12 +224,15 @@ func parseRFC5322Date(value string) (time.Time, error) {
 		}
 		unfolded = unfolded[:m[2]] + strconv.Itoa(year) + unfolded[m[3]:]
 	}
+	if m := leapSecond.FindStringSubmatchIndex(unfolded); m != nil {
+		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
+	}
 	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
 		end := m[5]
 		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
 		// net/mail would discard the suffix after a numeric replacement. Keep
 		// its existing behavior for extensions it accepts, such as GMT+0000
-		// (unfolded already has its separators and year rewritten).
+		// (unfolded already has its separators, year and leap second rewritten).
 		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
 			return mail.ParseDate(unfolded)
 		}
