@@ -249,8 +249,11 @@ func (t *matcherTest) tryMatch(ctx context.Context, d *RuntimeData, source strin
 		if t.keyCompiled != nil && t.keyCompiled[i] != nil {
 			ok, matches, err = t.keyCompiled[i](ctx, source)
 		} else {
+			// RFC 5229 §3: "Only one pass through the string SHALL be
+			// done." The expanded key is not expanded again: a value
+			// holding "${...}" text is that text.
 			key = expandVars(d, key)
-			ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, expandVars(d, key))
+			ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, key)
 
 			// RFC 5231, Section 5.4:
 			// With the "i;ascii-numeric" comparator, a numeric comparison is
