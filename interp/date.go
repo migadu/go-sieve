@@ -242,10 +242,12 @@ type DateTest struct {
 func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 	header := expandVars(rd, d.Header)
 
-	values, err := rd.Msg.HeaderGet(header)
+	index := fieldIndex{Index: d.Index, Last: d.Last}
+	byName, err := index.selectFields([]string{header}, rd.Msg.HeaderGet)
 	if err != nil {
 		return false, err
 	}
+	values := byName[0]
 
 	// Handle :count match type
 	if d.isCount() {
@@ -263,21 +265,8 @@ func (d DateTest) Check(ctx context.Context, rd *RuntimeData) (bool, error) {
 		return false, nil
 	}
 
-	// Select the appropriate header value based on index
-	var value string
-	if d.Index > 0 {
-		idx := d.Index - 1 // Convert to 0-based
-		if d.Last {
-			// Index from the end
-			idx = len(values) - d.Index
-		}
-		if idx < 0 || idx >= len(values) {
-			return false, nil
-		}
-		value = values[idx]
-	} else {
-		value = values[0]
-	}
+	// The first field (RFC 5260 §4), or the one :index selects.
+	value := values[0]
 
 	// Parse the date from the header
 	t, err := parseDateHeader(value)

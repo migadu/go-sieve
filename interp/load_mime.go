@@ -84,6 +84,14 @@ func (o *mimeTestOpts) scope(d *RuntimeData) ([]*mimePart, error) {
 	return cur.subtree(), nil
 }
 
+// parts returns the parts a test examines with :mime, or nil without it.
+func (o *mimeTestOpts) parts(d *RuntimeData) ([]*mimePart, error) {
+	if !o.enabled {
+		return nil, nil
+	}
+	return o.scope(d)
+}
+
 // values applies the MIMEOPTS to the raw values of header name. It returns the
 // strings to match and what they add to a :count: with :type, :subtype or
 // :contenttype the values that parsed, with :param the parameters found.
