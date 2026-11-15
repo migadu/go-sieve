@@ -94,8 +94,9 @@ func CompileSafeRegex(pattern string, limits RegexLimits) (*SafeRegexMatcher, er
 	if len(pattern) > limits.MaxPatternLength {
 		return nil, fmt.Errorf("regex pattern too long: %d > %d", len(pattern), limits.MaxPatternLength)
 	}
-	// regexp.Compile is linear in the (bounded) pattern length and rejects
-	// programs that would expand too large, so it is self-limiting here.
+	// The key's byte length is bounded, but counted repetition can still expand
+	// its compiled program substantially. The matching input and soft-wait limits
+	// below do not bound this inherited compilation cost.
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("regex compile error: %w", err)
