@@ -54,9 +54,21 @@ type RuntimeData struct {
 	RedirectAddr    []string
 	Mailboxes       []string
 	MailboxesCreate []string // Mailboxes that should be created (RFC 5490 :create)
-	Flags           []string
-	Keep            bool
-	ImplicitKeep    bool
+	// Flags is the imap4flags internal variable (RFC 5232 §3), which only
+	// setflag, addflag and removeflag change. The implicit keep stores the
+	// message with its final value.
+	Flags []string
+	// MailboxFlags holds the flags of the copy each mailbox of Mailboxes gets
+	// (RFC 5232 §5): the fileinto's :flags, or else the value the internal
+	// variable had when the fileinto ran. Filed into twice, a mailbox has the
+	// flags of the last fileinto (RFC 5232 §3).
+	MailboxFlags map[string][]string
+	// KeepFlags holds the flags of the copy an explicit keep stores, chosen as
+	// for fileinto; kept twice, the last keep's. They apply whenever Keep is
+	// set: an explicit keep stands in for the implicit one (RFC 5228 §2.10.2).
+	KeepFlags    []string
+	Keep         bool
+	ImplicitKeep bool
 
 	FlagAliases map[string]string
 
@@ -102,6 +114,7 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		Mailboxes:       make([]string, len(d.Mailboxes)),
 		MailboxesCreate: make([]string, len(d.MailboxesCreate)),
 		Flags:           make([]string, len(d.Flags)),
+		KeepFlags:       append([]string(nil), d.KeepFlags...),
 		Keep:            d.Keep,
 		ImplicitKeep:    d.ImplicitKeep,
 		Rejected:        d.Rejected,
@@ -126,6 +139,13 @@ func (d *RuntimeData) Copy() *RuntimeData {
 		newData.VacationResponses = make(map[string]VacationResponse, len(d.VacationResponses))
 		for k, v := range d.VacationResponses {
 			newData.VacationResponses[k] = v
+		}
+	}
+
+	if d.MailboxFlags != nil {
+		newData.MailboxFlags = make(map[string][]string, len(d.MailboxFlags))
+		for k, v := range d.MailboxFlags {
+			newData.MailboxFlags[k] = append([]string(nil), v...)
 		}
 	}
 

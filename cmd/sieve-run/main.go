@@ -81,8 +81,15 @@ func main() {
 
 	fmt.Println("redirect:", data.RedirectAddr)
 	fmt.Println("fileinfo:", data.Mailboxes)
+	for _, mailbox := range data.Mailboxes {
+		fmt.Printf("  %s flags: %s\n", mailbox, strings.Join(data.MailboxFlags[mailbox], " "))
+	}
 	fmt.Println("keep:", data.ImplicitKeep || data.Keep)
-	fmt.Printf("flags: %s\n", strings.Join(data.Flags, " "))
+	keepFlags := data.Flags
+	if data.Keep {
+		keepFlags = data.KeepFlags
+	}
+	fmt.Printf("  keep flags: %s\n", strings.Join(keepFlags, " "))
 	if data.Rejected {
 		action := "reject"
 		if data.RejectExtended {
