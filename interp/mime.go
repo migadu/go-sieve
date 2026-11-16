@@ -159,11 +159,7 @@ func buildMIMEChildren(p *mimePart, contentType string, body []byte, depth int, 
 			if *count >= maxMIMEParts {
 				return
 			}
-			hdr, partBody, err := parsePartHeader(raw)
-			if err != nil {
-				// Unparseable header: an opaque leaf holding everything.
-				hdr, partBody = nil, raw
-			}
+			hdr, partBody := readBodyPart(raw)
 			child := &mimePart{header: hdr, body: partBody}
 			p.children = append(p.children, child)
 			*count++
@@ -305,6 +301,21 @@ func (h partHeader) Get(name string) string {
 		return values[0]
 	}
 	return ""
+}
+
+// readBodyPart splits one body part of a multipart into its header and body.
+// A part whose header does not parse is still a part: the body test searches
+// "All MIME parts with matching types" (RFC 5173 §5.2) and foreverypart
+// "walks though every MIME part of a message" (RFC 5703 §3). It is read as a
+// leaf with no header fields holding the whole part, header lines included,
+// so its type is the text/plain default (RFC 2045 §5.2). The body test and
+// the MIME tree both read parts here, so they see the same parts.
+func readBodyPart(raw []byte) (partHeader, []byte) {
+	hdr, body, err := parsePartHeader(raw)
+	if err != nil {
+		return nil, raw
+	}
+	return hdr, body
 }
 
 var errMalformedPartHeader = errors.New("malformed MIME part header")
