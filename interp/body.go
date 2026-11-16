@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"mime"
 	"strings"
 
 	"github.com/emersion/go-message"
@@ -72,14 +71,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		if contentType == "" {
 			contentType = "text/plain; charset=us-ascii"
 		}
-		mediaType, params, err := mime.ParseMediaType(contentType)
-		if err != nil {
-			mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
-		}
+		// Parsed as the MIME tree parses it (buildMIMEChildren), so the body
+		// test and the mime extension read the same type and boundary.
+		mediaType, params := parseMediaTypeLenient(contentType)
 		if mediaType == "" {
 			mediaType = "text/plain"
 		}
-		mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 
 		// Check if the current part's content-type matches
 		process := false
