@@ -41,6 +41,7 @@ if date :zone "+0000" "X-Date" "year" "2019" { fileinto "wrong-year"; }
 	}
 	values = append(values,
 		"2019-01-01T12:00:00+01:60", "2019-01-01T12:00:00+24:00", "2019-01-01T12:00:00Z\v",
+		"Tue, 01 Jan 2019 12:00:00 +0000\r\n\r\n", "2019-01-01T12:00:00Z\r\n\r\n",
 		"Tue, 01 Jan 2019 12:00:00.125 GMT+1", "Tue, 01 Jan 2019 12:00:00.125 +0060")
 	saved := time.Local
 	t.Cleanup(func() { time.Local = saved })
@@ -85,6 +86,8 @@ if date :originalzone "X-Date" "iso8601" "2019-01-01T12:00:00-05:00" { fileinto 
 		{"\tTue, 01 Jan 2019 12:00:00 GMT \t", "one,utc"},
 		{"Tue, 01 Jan 2019 12:00:00 GMT\r\n", "one,utc"},
 		{"Tue, 01 Jan 2019 12:00:00 GMT\r\n \t", "one,utc"},
+		{"Tue, 01 Jan 2019 12:00:00 +0000\r\n \r\n", "one,utc"},
+		{"Tue, 01 Jan 2019 12:00:00 GMT\r\n \r\n\t", "one,utc"},
 		{"Tue, 01 Jan 2019 12:00:00 +0000\r\n\t(last hop)", "one,utc"},
 		{"Tue, 01 Jan 2019 12:00:00 -0000 (outer (inner;))", "one,utc"},
 		{"Tue, 01 Jan 2019 12:00:00 GMT (quoted\\\x00 and obsolete\vcomment)", "one,utc"},
@@ -97,8 +100,11 @@ if date :originalzone "X-Date" "iso8601" "2019-01-01T12:00:00-05:00" { fileinto 
 		{"Sat, 31 Dec (year) 116 23 (h):59 (m):60 (s) GMT (last; hop)", "one,leap"},
 		{"2019-01-01T12:00:00Z", "one,utc"},
 		{" 2019-01-01T12:00:00Z \t\r\n", "one,utc"},
+		{"\r\n\t2019-01-01T12:00:00Z", "one,utc"},
 		{"2019-01-01T12:00:00+01:30", "one,numeric"},
 		{"\t2019-01-01T12:00:00+01:30\t\r\n", "one,numeric"},
+		{"2019-01-01T12:00:00+01:30\r\n \r\n", "one,numeric"},
+		{"2019-01-01T12:00:00+01:30\r\n \r\n\t", "one,numeric"},
 		{"Tue, 01 Jan 2019 12:00:00.125 +0000", "one,utc"},
 		{"01 Jan 2019 12:00:00.125 XYZ", "one,utc"},
 		{"01 Jan 2019 12:00:00,125 XYZ", "one,utc"},

@@ -403,11 +403,18 @@ func parseDateHeader(value string) (time.Time, error) {
 }
 
 func parseHeaderDate(value string) (parsedHeaderDate, error) {
-	// Header getters may include a final CRLF. Other controls and Unicode
-	// white space are part of the value and must survive zone validation.
-	value = strings.Trim(value, " \t")
-	value = strings.TrimSuffix(value, "\r\n")
-	value = strings.Trim(value, " \t")
+	// Header getters may include a single terminating CRLF. Strip it once
+	// before unfolding outer FWS or splitting at a Received semicolon, so a
+	// trailing fold (CRLF WSP) is not turned into a bare CRLF and a doubled
+	// CRLF after ';' is still rejected.
+	return parseHeaderDateField(strings.TrimSuffix(value, "\r\n"))
+}
+
+func parseHeaderDateField(value string) (parsedHeaderDate, error) {
+	// Unfold outer RFC 5322 FWS (WSP and CRLF 1*WSP). Bare CR/LF, other
+	// controls, and Unicode white space remain part of the value and must
+	// survive zone validation.
+	value = trimDateFWS(value)
 	if value == "" {
 		return parsedHeaderDate{}, fmt.Errorf("empty date value")
 	}
@@ -434,10 +441,32 @@ func parseHeaderDate(value string) (parsedHeaderDate, error) {
 	// field)", and with more than one "the last one that appears SHOULD be
 	// used". Semicolons in comments or quoted strings are not separators.
 	if i := lastDateSeparator(value); i >= 0 {
-		return parseHeaderDate(value[i+1:])
+		return parseHeaderDateField(value[i+1:])
 	}
 
 	return parsedHeaderDate{}, fmt.Errorf("unable to parse date: %s", value)
+}
+
+// trimDateFWS trims leading and trailing RFC 5322 folding white space (runs of
+// SP/HTAB and CRLF followed by at least one SP/HTAB, including obs-FWS).
+func trimDateFWS(s string) string {
+	for len(s) > 0 {
+		if s[0] == ' ' || s[0] == '\t' {
+			s = s[1:]
+		} else if isDateFold(s, 0) {
+			s = s[3:]
+		} else {
+			break
+		}
+	}
+	for {
+		trimmed := strings.TrimRight(s, " \t")
+		if len(trimmed) == len(s) {
+			break
+		}
+		s = strings.TrimSuffix(trimmed, "\r\n")
+	}
+	return s
 }
 
 // validRFC3339Zone checks the offset bounds time.Parse's generic fallback
