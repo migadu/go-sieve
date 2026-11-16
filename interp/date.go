@@ -339,8 +339,9 @@ func commentLen(s string) int {
 }
 
 // parseDateHeader parses the date-time of a header value: the whole value, as
-// in a Date: field, or else the text after its last semicolon, as in a
-// Received: field. It supports various common date formats.
+// in a Date: field, or else the text after its last semicolon outside
+// comments, quoted strings and domain-literals, as in a Received: field. It
+// supports various common date formats.
 func parseDateHeader(value string) (time.Time, error) {
 	parsed, err := parseHeaderDate(value)
 	return parsed.Time, err
