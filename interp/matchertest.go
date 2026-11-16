@@ -236,7 +236,18 @@ func (t *matcherTest) countMatches(d *RuntimeData, value uint64) bool {
 }
 
 func (t *matcherTest) tryMatch(ctx context.Context, d *RuntimeData, source string) (bool, error) {
-	for i, key := range t.key {
+	return t.tryMatchKeys(ctx, d, source, nil)
+}
+
+// tryMatchKeys compares source against t's keys, or against expanded when the
+// caller has already expanded variables once at statement entry (such as
+// deleteheader's value-patterns across multiple header occurrences).
+func (t *matcherTest) tryMatchKeys(ctx context.Context, d *RuntimeData, source string, expanded []string) (bool, error) {
+	keys := t.key
+	if expanded != nil {
+		keys = expanded
+	}
+	for i, key := range keys {
 		// Honour the script execution deadline between keys so a test with
 		// many keys/values can't run past the budget.
 		if err := ctx.Err(); err != nil {
@@ -248,35 +259,39 @@ func (t *matcherTest) tryMatch(ctx context.Context, d *RuntimeData, source strin
 			matches []string
 			err     error
 		)
-		if t.keyCompiled != nil && t.keyCompiled[i] != nil {
+		if t.keyCompiled != nil && i < len(t.keyCompiled) && t.keyCompiled[i] != nil &&
+			(expanded == nil || (i < len(t.key) && key == t.key[i])) {
 			ok, matches, err = t.keyCompiled[i](ctx, source)
-		} else if t.match == MatchRegex {
-			ok, matches, err = matchRegex(ctx, &d.regexes, t.comparator, expandVars(d, key), source)
 		} else {
 			// RFC 5229 §3: "Only one pass through the string SHALL be
 			// done." The expanded key is not expanded again: a value
 			// holding "${...}" text is that text.
-			key = expandVars(d, key)
-			ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, key)
-
-			// RFC 5231, Section 5.4:
-			// With the "i;ascii-numeric" comparator, a numeric comparison is
-			// performed.
-			if t.match == MatchValue && t.comparator == ComparatorASCIINumeric {
-				var lhs, rhs *uint64
-				if l, err := strconv.ParseUint(source, 10, 64); err == nil {
-					lhs = &l
-				}
-				if r, err := strconv.ParseUint(key, 10, 64); err == nil {
-					rhs = &r
-				}
-
-				ok = t.relational.CompareNumericValue(lhs, rhs)
-				// No match variables for :value
-				matches = nil
-				err = nil
+			if expanded == nil {
+				key = expandVars(d, key)
 			}
+			if t.match == MatchRegex {
+				ok, matches, err = matchRegex(ctx, &d.regexes, t.comparator, key, source)
+			} else {
+				ok, matches, err = testString(ctx, t.comparator, t.match, t.relational, source, key)
 
+				// RFC 5231, Section 5.4:
+				// With the "i;ascii-numeric" comparator, a numeric comparison is
+				// performed.
+				if t.match == MatchValue && t.comparator == ComparatorASCIINumeric {
+					var lhs, rhs *uint64
+					if l, err := strconv.ParseUint(source, 10, 64); err == nil {
+						lhs = &l
+					}
+					if r, err := strconv.ParseUint(key, 10, 64); err == nil {
+						rhs = &r
+					}
+
+					ok = t.relational.CompareNumericValue(lhs, rhs)
+					// No match variables for :value
+					matches = nil
+					err = nil
+				}
+			}
 		}
 		if err != nil {
 			return false, err
