@@ -169,7 +169,10 @@ func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 
 		// Check if the value at this index matches any pattern
 		matches, err := c.valueMatchesPatterns(ctx, d, values[idx], valuePatterns)
-		if err != nil || !matches {
+		if err != nil {
+			return err
+		}
+		if !matches {
 			return nil
 		}
 
@@ -185,10 +188,12 @@ func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 	}
 
 	// No :index, check all occurrences
+	savedEdits := len(d.HeaderEdits)
 	for _, val := range values {
 		matches, err := c.valueMatchesPatterns(ctx, d, val, valuePatterns)
 		if err != nil {
-			continue
+			d.HeaderEdits = d.HeaderEdits[:savedEdits]
+			return err
 		}
 		if matches {
 			d.HeaderEdits = append(d.HeaderEdits, HeaderEdit{
@@ -207,17 +212,18 @@ func (c CmdDeleteHeader) valueMatchesPatterns(ctx context.Context, d *RuntimeDat
 	// Trim leading/trailing whitespace as per RFC 5293
 	value = strings.TrimSpace(decodeHeaderValue(value))
 
-	for _, pattern := range patterns {
-		ok, err := c.matcherTest.tryMatch(ctx, d, value)
-		if err != nil {
-			return false, err
+	// If matcherTest wasn't set up (direct struct construction without
+	// loadDeleteHeader), default to :is matching over patterns.
+	if c.matcherTest.match == "" {
+		cmp := c.comparator
+		if cmp == "" {
+			cmp = DefaultComparator
 		}
-		if ok {
-			return true, nil
-		}
-		// If matcherTest wasn't set up (no value-patterns parsing), do simple matching
-		if c.matcherTest.match == "" {
-			ok, _, err = testString(ctx, c.comparator, MatchIs, "", value, pattern)
+		for _, pattern := range patterns {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			ok, _, err := testString(ctx, cmp, MatchIs, "", value, pattern)
 			if err != nil {
 				return false, err
 			}
@@ -225,8 +231,10 @@ func (c CmdDeleteHeader) valueMatchesPatterns(ctx context.Context, d *RuntimeDat
 				return true, nil
 			}
 		}
+		return false, nil
 	}
-	return false, nil
+
+	return c.matcherTest.tryMatchKeys(ctx, d, value, patterns)
 }
 
 // applyHeaderEditsToValues applies header edits to get the current state of a header
