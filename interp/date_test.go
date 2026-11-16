@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"net/mail"
 	"testing"
 	"time"
 	_ "time/tzdata" // the zones the test runs parseDateHeader in, on hosts without zoneinfo
@@ -115,7 +114,7 @@ func TestParseDateHeaderCFWS(t *testing.T) {
 		{"Wed,(c)17 Jul 1996 02:23:25 +0530", 5*h + 30*60},
 		// obs-year = [CFWS] 2*DIGIT [CFWS].
 		{"Wed, 17 Jul (y) 96 (t) 02:23:25 PDT", -7 * h},
-		// A zone left to net/mail as written (an extension it accepts).
+		// A zone that is not an RFC 5322 zone, read as "-0000".
 		{"Wed , 17 Jul 1996 02:23:25 (c) GMT+0000", 0},
 	}
 	for _, tc := range cases {
@@ -164,7 +163,7 @@ func TestParseDateHeaderObsoleteYear(t *testing.T) {
 		{"Mon, 1 Jan 000 00:00:00 +0000", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), 0},
 		{"Thu, 31 Dec 999 23:59:59 +0000", time.Date(2899, 12, 31, 23, 59, 59, 0, time.UTC), 0},
 		{"Mon, 3 Jan 100 10:00:00 EST", time.Date(2000, 1, 3, 10, 0, 0, 0, time.UTC), -5 * h},
-		// A zone left to net/mail as written still gets the year read by section 4.3.
+		// A zone that is not an RFC 5322 zone still gets the year read by section 4.3.
 		{"Mon, 17 Jul 50 02:23:25 GMT+0000", time.Date(1950, 7, 17, 2, 23, 25, 0, time.UTC), 0},
 		// Four digits are taken as written.
 		{"Sun, 17 Jul 2050 02:23:25 +0000", time.Date(2050, 7, 17, 2, 23, 25, 0, time.UTC), 0},
@@ -190,11 +189,7 @@ func TestParseDateHeaderObsoleteYear(t *testing.T) {
 func TestParseDateHeaderInvalid(t *testing.T) {
 	for _, value := range []string{
 		"", "PDT", "Wed, 17 Jul 1996 PDT", "not a date 12:00 PDT",
-		// Replacing only the alphabetic prefix would let net/mail discard the
-		// rest after the numeric replacement, turning these errors into dates.
-		"Wed, 17 Jul 1996 02:23:25 PDT+0400",
-		"Wed, 17 Jul 1996 02:23:25 PDT0",
-		"Wed, 17 Jul 1996 02:23:25 PDT-0700",
+		// An unpaired CR or LF is not folding white space.
 		"Wed, 17 Jul 1996 02:23:25\r PDT",
 		"Wed, 17 Jul 1996 02:23:25\n PDT",
 		// NUL is not comment text (ctext or obs-ctext), so removing a
@@ -221,7 +216,6 @@ func TestParseDateHeaderInvalid(t *testing.T) {
 		// year = 4*DIGIT / obs-year, and obs-year is 2*DIGIT (RFC 5322
 		// sections 3.3, 4.3).
 		"Mon, 17 Jul 5 02:23:25 +0000",
-		"Mon, 17 Jul 50 02:23:25 PDT+0400",
 	} {
 		if got, err := parseDateHeader(value); err == nil {
 			t.Errorf("%q parsed as %v", value, got)
@@ -229,25 +223,71 @@ func TestParseDateHeaderInvalid(t *testing.T) {
 	}
 }
 
-// An alphabetic prefix that is not a whole obs-zone keeps net/mail's reading,
-// including its accepted GMT extension and permissive suffix handling.
-func TestParseDateHeaderPreservesParserExtensions(t *testing.T) {
-	for _, value := range []string{
-		"Wed, 17 Jul 1996 02:23:25 GMT+0000",
-		"Wed, 17 Jul 1996 02:23:25 PDT/UTC",
-	} {
-		want, err := mail.ParseDate(value)
+// A zone that is neither a numeric zone nor a name (a run of letters on its
+// own) is read as "-0000", the date and time as written, in whatever zone the
+// host runs. RFC 5322 section 3.3 has zone = (FWS ( "+" / "-" ) 4DIGIT) /
+// obs-zone, section 4.3 has a name "whose meaning is not known" be "considered
+// equivalent to "-0000"", and RFC 5256 section 2.2 says "If the time zone is
+// invalid, the date and time SHOULD be treated as UTC."
+//
+// net/mail.ParseDate takes the time of day after GMT and a signed hour as UTC
+// and labels it with the hour (12:00:00 GMT+1 is 13:00:00 +0100), reads a sign
+// and one to three digits (+01) and a name cut short at its T (CET/CEST) by the
+// host's zone, and does not parse GMT+0200, UTC-0500 or PDT+0400 at all.
+func TestParseDateHeaderMalformedZone(t *testing.T) {
+	jan := time.Date(2019, 1, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		value string
+		want  time.Time // the date and time as written, in UTC
+	}{
+		{"Tue, 01 Jan 2019 12:00:00 GMT+1", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT-5", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+01", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+23", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+0001", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+10 (CET)", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+1(CET)", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+0200", jan},
+		{"Tue, 01 Jan 2019 12:00:00 UTC-0500", jan},
+		{"Tue, 01 Jan 2019 12:00:00 utc+0100", jan},
+		{"Tue, 01 Jan 2019 12:00:00 PDT+0400", jan},
+		{"Tue, 01 Jan 2019 12:00:00 PDT-0700", jan},
+		{"Tue, 01 Jan 2019 12:00:00 PDT0", jan},
+		{"Tue, 01 Jan 2019 12:00:00 CET/CEST", jan},
+		{"Tue, 01 Jan 2019 12:00:00 PDT/UTC", jan},
+		{"Tue, 01 Jan 2019 12:00:00 EST5EDT", jan},
+		{"Tue, 01 Jan 2019 12:00:00 +01", jan},
+		{"Tue, 01 Jan 2019 12:00:00 -03", jan},
+		{"Tue, 01 Jan 2019 12:00:00 +001", jan},
+		{"Tue, 01 Jan 2019 12:00:00 +4", jan},
+		{"Tue, 01 Jan 2019 12:00:00 +01:00", jan},
+		{"Tue, 01 Jan 2019 12:00:00\r\n +01 (CET)", jan},
+		// GMT with a zero hour is Universal Time under any reading.
+		{"Tue, 01 Jan 2019 12:00:00 GMT+0", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT-00", jan},
+		{"Tue, 01 Jan 2019 12:00:00 GMT+0000", jan},
+		// The year and the leap second are still read by RFC 5322.
+		{"Mon, 17 Jul 50 02:23:25 PDT+0400", time.Date(1950, 7, 17, 2, 23, 25, 0, time.UTC)},
+		{"Sat, 31 Dec 2016 23:59:60 GMT+1", time.Date(2016, 12, 31, 23, 59, 59, 0, time.UTC)},
+	}
+
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	for _, name := range []string{"UTC", "Africa/Casablanca", "America/Sao_Paulo", "Europe/Berlin", "America/Los_Angeles", "America/New_York"} {
+		loc, err := time.LoadLocation(name)
 		if err != nil {
-			t.Fatalf("net/mail: %q: %v", value, err)
+			t.Fatal(err)
 		}
-		got, err := parseDateHeader(value)
-		if err != nil {
-			t.Fatalf("%q: %v", value, err)
-		}
-		_, wantOffset := want.Zone()
-		_, gotOffset := got.Zone()
-		if !got.Equal(want) || gotOffset != wantOffset {
-			t.Errorf("%q: %v, want %v", value, got, want)
+		time.Local = loc // no test in this package runs in parallel
+		for _, tc := range cases {
+			got, err := parseDateHeader(tc.value)
+			if err != nil {
+				t.Errorf("TZ=%s %q: %v", name, tc.value, err)
+				continue
+			}
+			if _, offset := got.Zone(); !got.Equal(tc.want) || offset != 0 {
+				t.Errorf("TZ=%s %q: parsed as %v, want %v", name, tc.value, got, tc.want)
+			}
 		}
 	}
 }
