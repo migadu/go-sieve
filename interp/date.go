@@ -164,10 +164,10 @@ var obsZones = map[string]string{
 	"PDT": "-0700", "PST": "-0800",
 }
 
-// alphabeticZone matches a date-time (RFC 5322 §3.3) up to the end of its
-// time-of-day (the field's first colon is the one after the hour) and the run
-// of letters that follows it after any folding white space: the zone.
-var alphabeticZone = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2})?([ \t]*)([A-Za-z]+)`)
+// zoneToken matches a date-time (RFC 5322 §3.3) up to the end of its
+// time-of-day (the field's first colon is the one after the hour), any white
+// space after it, and the zone: the text up to the next white space or comment.
+var zoneToken = regexp.MustCompile(`^[^:]*\d:\d{2}(?::\d{2}(?:[.,]\d+)?)?([ \t]*)([^ \t(]*)`)
 
 // leapSecond matches a date-time (RFC 5322 §3.3) up to the seconds of its
 // time-of-day (the field's first colon is the one after the hour) when they
@@ -198,6 +198,13 @@ var obsYear = regexp.MustCompile(`^[^:]*[ \t](\d{2,3})[ \t]+\d{1,2}:`)
 // "-0000", which §4.3 says they "SHOULD all be considered equivalent to"
 // without out-of-band information.
 //
+// The entire zone token must be a numeric offset or an alphabetic name, with
+// only CFWS after it. RFC 5260 section 4 makes a syntactically invalid date
+// false; RFC 5256's invalid-zone recovery applies to IMAP SORT instead. Mixed
+// tokens such as GMT+1 and short offsets such as +01 must not reach time.Parse,
+// which can interpret them as host-dependent zone names. net/mail also accepts
+// trailing junk after a numeric offset, so the suffix is checked here first.
+//
 // net/mail.ParseDate reads a two-digit year with time.Parse's "06", which puts
 // 00-68 in 20xx, and does not parse a three-digit year (tm_year written as is
 // after 1999). §4.3 adds 2000 to a two-digit year from 00 to 49, and 1900 to
@@ -220,14 +227,13 @@ func parseRFC5322Date(value string) (time.Time, error) {
 }
 
 func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
-	// Unfold exactly as net/mail does, without turning an unpaired CR or LF
-	// before the zone into valid white space during the replacement below.
-	unfolded := strings.ReplaceAll(value, "\r\n", "")
+	// Normalize valid comments first: obsolete quoted-pairs may contain
+	// CR or LF inside one. Every line break left outside a comment must be
+	// a fold, which normalizeCFWS consumes, rather than discarded suffix text.
+	unfolded := normalizeCFWS(value)
 	if strings.ContainsAny(unfolded, "\r\n") {
-		t, err := mail.ParseDate(value)
-		return parsedHeaderDate{Time: t}, err
+		return parsedHeaderDate{}, fmt.Errorf("invalid folding white space in date: %s", value)
 	}
-	unfolded = normalizeCFWS(unfolded)
 	if m := obsYear.FindStringSubmatchIndex(unfolded); m != nil {
 		year, _ := strconv.Atoi(unfolded[m[2]:m[3]])
 		if m[3]-m[2] == 2 && year < 50 {
@@ -242,33 +248,62 @@ func parseRFC5322DateValue(value string) (parsedHeaderDate, error) {
 		unfolded = unfolded[:m[2]] + "59" + unfolded[m[3]:]
 		isLeapSecond = true
 	}
-	if m := alphabeticZone.FindStringSubmatchIndex(unfolded); m != nil {
-		end := m[5]
-		// Replace a whole zone token only. For example, PDT+0400 is not PDT:
-		// net/mail would discard the suffix after a numeric replacement. Keep
-		// its existing behavior for extensions it accepts, such as GMT+0000
-		// (unfolded already has its separators, year and leap second rewritten).
-		if end < len(unfolded) && unfolded[end] != ' ' && unfolded[end] != '\t' && unfolded[end] != '(' {
-			t, err := mail.ParseDate(unfolded)
-			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
+	var location *time.Location
+	if m := zoneToken.FindStringSubmatchIndex(unfolded); m != nil {
+		zone := unfolded[m[4]:m[5]]
+		if strings.Trim(unfolded[m[5]:], " \t") != "" {
+			return parsedHeaderDate{}, fmt.Errorf("trailing text after date zone: %s", value)
 		}
-		// Nor are the letters the zone when a numeric offset follows them after
-		// white space or a comment, as in "02:23:25 PM -0700": the grammar has
-		// one zone after the time of day ("time = time-of-day zone", §3.3), and
-		// net/mail would discard the offset after the replacement.
-		if rest := strings.TrimLeft(unfolded[end:], " \t"); rest != "" && (rest[0] == '+' || rest[0] == '-') {
-			t, err := mail.ParseDate(unfolded)
-			return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
+		numeric, err := headerDateZone(zone)
+		if err != nil {
+			return parsedHeaderDate{}, err
 		}
-		zone, ok := obsZones[strings.ToUpper(unfolded[m[4]:end])]
-		if !ok {
-			zone = "-0000"
+		// An alphabetic obs-zone may immediately follow the time, but a
+		// numeric offset requires FWS (RFC 5322 section 3.3).
+		if (zone[0] == '+' || zone[0] == '-') && m[2] == m[3] {
+			return parsedHeaderDate{}, fmt.Errorf("missing white space before numeric date zone: %s", value)
 		}
-		// An obs-zone needs no white space before it, a numeric zone does.
-		unfolded = unfolded[:m[2]] + " " + zone + unfolded[end:]
+		// Parse the calendar with a neutral zone, then retain the validated
+		// offset separately. RFC 5322 bounds the minutes, not the two hour
+		// digits; time.Parse's accepted offset range varies by Go version.
+		offset, _ := parseZoneOffset(numeric)
+		location = time.FixedZone("", offset)
+		unfolded = unfolded[:m[2]] + " +0000"
 	}
 	t, err := mail.ParseDate(unfolded)
+	if err == nil && location != nil {
+		t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), location)
+	}
 	return parsedHeaderDate{Time: t, leapSecond: isLeapSecond}, err
+}
+
+// headerDateZone validates a complete RFC 5322 zone token and returns its
+// numeric offset. The last two numeric digits must be 00..59 (section 3.3);
+// section 4.3 assigns unknown alphabetic names the offset -0000.
+func headerDateZone(zone string) (string, error) {
+	if len(zone) == 5 && (zone[0] == '+' || zone[0] == '-') {
+		for i := 1; i < len(zone); i++ {
+			if !isDigit(zone[i]) {
+				return "", fmt.Errorf("invalid numeric date zone: %s", zone)
+			}
+		}
+		if zone[3] > '5' {
+			return "", fmt.Errorf("invalid minutes in date zone: %s", zone)
+		}
+		return zone, nil
+	}
+	if zone == "" {
+		return "", fmt.Errorf("missing date zone")
+	}
+	for i := 0; i < len(zone); i++ {
+		if !isLetter(zone[i]) {
+			return "", fmt.Errorf("invalid date zone: %s", zone)
+		}
+	}
+	if numeric := obsZones[strings.ToUpper(zone)]; numeric != "" {
+		return numeric, nil
+	}
+	return "-0000", nil
 }
 
 // normalizeCFWS returns an unfolded date-time with every comment (RFC 5322
@@ -287,8 +322,11 @@ func normalizeCFWS(s string) string {
 	digits := false // a digit was written: the day-of-week is behind
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if c == ' ' || c == '\t' {
+		if c == ' ' || c == '\t' || isDateFold(s, i) {
 			sep = true
+			if c == '\r' {
+				i++ // consume the LF; the following white space is a separator
+			}
 			continue
 		}
 		if c == '(' {
@@ -313,20 +351,37 @@ func normalizeCFWS(s string) string {
 	return b.String()
 }
 
+// isDateFold recognizes CRLF followed by the white space RFC 5322 FWS needs.
+func isDateFold(s string, i int) bool {
+	return i+2 < len(s) && s[i] == '\r' && s[i+1] == '\n' && (s[i+2] == ' ' || s[i+2] == '\t')
+}
+
 func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+func isLetter(c byte) bool { return 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' }
 
 // commentLen returns the length of the comment s starts with, nested comments
 // and quoted-pairs included (RFC 5322 §3.2.2), or 0 if it is malformed or
-// does not close. An unquoted NUL is not ctext, including obsolete ctext;
-// a quoted NUL remains allowed by obs-qp (§4.1).
+// does not close. NUL and bare CR/LF are not ctext, including obsolete
+// ctext; quoted control bytes remain allowed by obs-qp (§4.1).
 func commentLen(s string) int {
 	depth := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
-		case 0:
+		case 0, '\n':
 			return 0
+		case '\r':
+			if !isDateFold(s, i) {
+				return 0
+			}
+			i++ // consume the LF of this valid fold
 		case '\\':
 			i++
+			if isDateFold(s, i) {
+				// Unfold first: the pair quotes the white space after CRLF,
+				// rather than a CR followed by an unpaired LF.
+				i += 2
+			}
 		case '(':
 			depth++
 		case ')':
@@ -348,7 +403,11 @@ func parseDateHeader(value string) (time.Time, error) {
 }
 
 func parseHeaderDate(value string) (parsedHeaderDate, error) {
-	value = strings.TrimSpace(value)
+	// Header getters may include a final CRLF. Other controls and Unicode
+	// white space are part of the value and must survive zone validation.
+	value = strings.Trim(value, " \t")
+	value = strings.TrimSuffix(value, "\r\n")
+	value = strings.Trim(value, " \t")
 	if value == "" {
 		return parsedHeaderDate{}, fmt.Errorf("empty date value")
 	}
@@ -359,27 +418,13 @@ func parseHeaderDate(value string) (parsedHeaderDate, error) {
 		return parsed, nil
 	}
 
-	// Try other common formats
-	formats := []string{
-		time.RFC1123Z,
-		time.RFC1123,
-		time.RFC822Z,
-		time.RFC822,
-		time.RFC3339,
-		time.RFC3339Nano,
-		"Mon, 2 Jan 2006 15:04:05 -0700",
-		"Mon, 2 Jan 2006 15:04:05 MST",
-		"2 Jan 2006 15:04:05 -0700",
-		"2 Jan 2006 15:04:05 MST",
-		"Mon, 02 Jan 2006 15:04:05 -0700",
-		"Mon, 02 Jan 2006 15:04:05 MST",
-		"02 Jan 2006 15:04:05 -0700",
-		"02 Jan 2006 15:04:05 MST",
-	}
-
-	for _, format := range formats {
+	// RFC 3339 is an additional recognized format. RFC 822/1123 numeric
+	// layouts are already handled above, and must not revive invalid zones
+	// that time.Parse accepts, such as +0060. Zone-name layouts would also
+	// reintroduce host-dependent parsing of malformed names such as GMT+1.
+	for _, format := range []string{time.RFC3339, time.RFC3339Nano} {
 		t, err := time.Parse(format, value)
-		if err == nil {
+		if err == nil && validRFC3339Zone(value) {
 			return parsedHeaderDate{Time: t}, nil
 		}
 	}
@@ -393,6 +438,21 @@ func parseHeaderDate(value string) (parsedHeaderDate, error) {
 	}
 
 	return parsedHeaderDate{}, fmt.Errorf("unable to parse date: %s", value)
+}
+
+// validRFC3339Zone checks the offset bounds time.Parse's generic fallback
+// can relax, accepting 24 hours or 60 minutes despite RFC 3339 section 5.6.
+// It is called only after the complete RFC 3339 layout has parsed.
+func validRFC3339Zone(value string) bool {
+	if strings.HasSuffix(value, "Z") {
+		return true
+	}
+	if len(value) < 6 {
+		return false
+	}
+	zone := value[len(value)-6:]
+	return (zone[0] == '+' || zone[0] == '-') && zone[3] == ':' &&
+		zone[1:3] < "24" && zone[4:6] < "60"
 }
 
 // lastDateSeparator returns the last semicolon outside comments, quoted

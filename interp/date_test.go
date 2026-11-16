@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"net/mail"
 	"testing"
 	"time"
 	_ "time/tzdata" // the zones the test runs parseDateHeader in, on hosts without zoneinfo
@@ -45,9 +44,14 @@ func TestParseDateHeaderObsoleteZone(t *testing.T) {
 		{"Wed, 17 Jan 1996 02:23:25 CET", time.Date(1996, 1, 17, 2, 23, 25, 0, time.UTC), 0},
 		{"Wed, 17 Jul 1996 02:23:25 CEST", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 0},
 		{"Wed, 17 Jul 1996 02:23:25 MSK", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 0},
-		// Numeric zones are net/mail's, unchanged.
+		// Numeric minutes are bounded by 59, but RFC 5322 does not bound the
+		// two hour digits. Preserve offsets older Go versions already accept.
 		{"Wed, 17 Jul 1996 02:23:25 -0700 (PDT)", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25 +0530", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 5*h + 30*60},
+		{"Wed, 17 Jul 1996 02:23:25 +2400", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 24 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -2459", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -(24*h + 59*60)},
+		{"Wed, 17 Jul 1996 02:23:25 +2500", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), 25 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -9959", time.Date(1996, 7, 17, 2, 23, 25, 0, time.UTC), -(99*h + 59*60)},
 	}
 
 	saved := time.Local
@@ -101,8 +105,13 @@ func TestParseDateHeaderCFWS(t *testing.T) {
 		// Nested comments and quoted-pairs (RFC 5322 section 3.2.2).
 		{"Wed, 17 Jul 1996 02:23:25 (a (nested) \\) comment) -0700", -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25 (\\(c) PDT", -7 * h},
-		// Obsolete quoted-pair permits an escaped NUL; unquoted NUL is invalid.
+		// Obsolete quoted-pair permits escaped controls; unquoted NUL is invalid.
 		{"Wed, 17 Jul 1996 02:23:25 (quoted\\\x00) -0700", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (quoted\\\nLF)", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (quoted\\\rCR)", -7 * h},
+		// Folding is removed before quoted-pair interpretation (section 2.2.3).
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (foldpair\\\r\n space)", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (foldpair\\\r\n\ttab)", -7 * h},
 		// A comment holding the characters the zone and the time are found by.
 		{"Wed, 17 Jul 1996 02:23:25 (UTC-7) PDT", -7 * h},
 		{"(Wed: 17 Jul) Wed, 17 Jul 1996 02:23:25 PDT", -7 * h},
@@ -115,8 +124,8 @@ func TestParseDateHeaderCFWS(t *testing.T) {
 		{"Wed,(c)17 Jul 1996 02:23:25 +0530", 5*h + 30*60},
 		// obs-year = [CFWS] 2*DIGIT [CFWS].
 		{"Wed, 17 Jul (y) 96 (t) 02:23:25 PDT", -7 * h},
-		// A zone left to net/mail as written (an extension it accepts).
-		{"Wed , 17 Jul 1996 02:23:25 (c) GMT+0000", 0},
+		// An unknown alphabetic name has offset -0000.
+		{"Wed , 17 Jul 1996 02:23:25 (c) XYZ", 0},
 	}
 	for _, tc := range cases {
 		got, err := parseDateHeader(tc.value)
@@ -164,8 +173,8 @@ func TestParseDateHeaderObsoleteYear(t *testing.T) {
 		{"Mon, 1 Jan 000 00:00:00 +0000", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), 0},
 		{"Thu, 31 Dec 999 23:59:59 +0000", time.Date(2899, 12, 31, 23, 59, 59, 0, time.UTC), 0},
 		{"Mon, 3 Jan 100 10:00:00 EST", time.Date(2000, 1, 3, 10, 0, 0, 0, time.UTC), -5 * h},
-		// A zone left to net/mail as written still gets the year read by section 4.3.
-		{"Mon, 17 Jul 50 02:23:25 GMT+0000", time.Date(1950, 7, 17, 2, 23, 25, 0, time.UTC), 0},
+		// An unknown alphabetic name still gets the year read by section 4.3.
+		{"Mon, 17 Jul 50 02:23:25 XYZ", time.Date(1950, 7, 17, 2, 23, 25, 0, time.UTC), 0},
 		// Four digits are taken as written.
 		{"Sun, 17 Jul 2050 02:23:25 +0000", time.Date(2050, 7, 17, 2, 23, 25, 0, time.UTC), 0},
 		{"Wed, 17 Jul 1968 02:23:25 +0000", time.Date(1968, 7, 17, 2, 23, 25, 0, time.UTC), 0},
@@ -190,11 +199,7 @@ func TestParseDateHeaderObsoleteYear(t *testing.T) {
 func TestParseDateHeaderInvalid(t *testing.T) {
 	for _, value := range []string{
 		"", "PDT", "Wed, 17 Jul 1996 PDT", "not a date 12:00 PDT",
-		// Replacing only the alphabetic prefix would let net/mail discard the
-		// rest after the numeric replacement, turning these errors into dates.
-		"Wed, 17 Jul 1996 02:23:25 PDT+0400",
-		"Wed, 17 Jul 1996 02:23:25 PDT0",
-		"Wed, 17 Jul 1996 02:23:25 PDT-0700",
+		// An unpaired CR or LF is not folding white space.
 		"Wed, 17 Jul 1996 02:23:25\r PDT",
 		"Wed, 17 Jul 1996 02:23:25\n PDT",
 		// NUL is not comment text (ctext or obs-ctext), so removing a
@@ -221,7 +226,6 @@ func TestParseDateHeaderInvalid(t *testing.T) {
 		// year = 4*DIGIT / obs-year, and obs-year is 2*DIGIT (RFC 5322
 		// sections 3.3, 4.3).
 		"Mon, 17 Jul 5 02:23:25 +0000",
-		"Mon, 17 Jul 50 02:23:25 PDT+0400",
 	} {
 		if got, err := parseDateHeader(value); err == nil {
 			t.Errorf("%q parsed as %v", value, got)
@@ -229,25 +233,76 @@ func TestParseDateHeaderInvalid(t *testing.T) {
 	}
 }
 
-// An alphabetic prefix that is not a whole obs-zone keeps net/mail's reading,
-// including its accepted GMT extension and permissive suffix handling.
-func TestParseDateHeaderPreservesParserExtensions(t *testing.T) {
-	for _, value := range []string{
-		"Wed, 17 Jul 1996 02:23:25 GMT+0000",
-		"Wed, 17 Jul 1996 02:23:25 PDT/UTC",
-	} {
-		want, err := mail.ParseDate(value)
+// Invalid zone syntax is not a date-time (RFC 5260 section 4), independently
+// of the host's zone. Only unknown alphabetic names have the -0000 recovery
+// specified by RFC 5322 section 4.3; RFC 5256's invalid-zone recovery is for SORT.
+func TestParseDateHeaderMalformedZone(t *testing.T) {
+	values := []string{
+		"Tue, 01 Jan 2019 12:00:00 GMT+1",
+		"Tue, 01 Jan 2019 12:00:00 GMT-5",
+		"Tue, 01 Jan 2019 12:00:00 GMT+01",
+		"Tue, 01 Jan 2019 12:00:00 GMT+23",
+		"Tue, 01 Jan 2019 12:00:00 GMT+0001",
+		"Tue, 01 Jan 2019 12:00:00 GMT+10 (CET)",
+		"Tue, 01 Jan 2019 12:00:00 GMT+1(CET)",
+		"Tue, 01 Jan 2019 12:00:00 GMT+0200",
+		"Tue, 01 Jan 2019 12:00:00 UTC-0500",
+		"Tue, 01 Jan 2019 12:00:00 utc+0100",
+		"Tue, 01 Jan 2019 12:00:00 PDT+0400",
+		"Tue, 01 Jan 2019 12:00:00 PDT-0700",
+		"Tue, 01 Jan 2019 12:00:00 PDT0",
+		"Tue, 01 Jan 2019 12:00:00 CET/CEST",
+		"Tue, 01 Jan 2019 12:00:00 PDT/UTC",
+		"Tue, 01 Jan 2019 12:00:00 EST5EDT",
+		"Tue, 01 Jan 2019 12:00:00 +01",
+		"Tue, 01 Jan 2019 12:00:00 -03",
+		"Tue, 01 Jan 2019 12:00:00 +001",
+		"Tue, 01 Jan 2019 12:00:00 +4",
+		"Tue, 01 Jan 2019 12:00:00 +01:00",
+		"Tue, 01 Jan 2019 12:00:00\r\n +01 (CET)",
+		"Tue, 01 Jan 2019 12:00:00 GMT+0",
+		"Tue, 01 Jan 2019 12:00:00 GMT-00",
+		"Tue, 01 Jan 2019 12:00:00 GMT+0000",
+		// Year and leap-second normalization must not repair an invalid zone.
+		"Mon, 17 Jul 50 02:23:25 PDT+0400",
+		"Sat, 31 Dec 2016 23:59:60 GMT+1",
+		"Sat, 31 Dec 2016 23:59:60 GMT+0000",
+		// Exact numeric token and range, without permissive fallback layouts.
+		"Tue, 01 Jan 2019 12:00:00 +0060",
+		"Tue, 01 Jan 2019 12:00:00 -0060",
+		"Tue, 01 Jan 2019 12:00:00 +2360",
+		"Tue, 01 Jan 2019 12:00:00 +2460",
+		"Tue, 01 Jan 2019 12:00:00 +00000",
+		"Tue, 01 Jan 2019 12:00:00 +0000junk",
+		"Tue, 01 Jan 2019 12:00:00 +0000GMT+1",
+		"Tue, 01 Jan 2019 12:00:00 +0000 junk",
+		"Tue, 01 Jan 2019 12:00:00 +0000 (c) +0100",
+		"Tue, 01 Jan 2019 12:00:00 PDT+0400 -0700",
+		"Tue, 01 Jan 2019 12:00:00 GMT junk",
+		"Tue, 01 Jan 2019 12:00:00 GMT (c) junk",
+		"Tue, 01 Jan 2019 12:00:00 G(c)MT",
+		// Controls may not be stripped out of a malformed zone or suffix.
+		"Tue, 01 Jan 2019 12:00:00 GMT\x00",
+		"Tue, 01 Jan 2019 12:00:00 +0000\x00",
+		"Tue, 01 Jan 2019 12:00:00 +0000\x0b",
+		"Tue, 01 Jan 2019 12:00:00 GMT\x7f",
+		// RFC3339 fallback must not normalize invalid offset components either.
+		"2019-01-01T12:00:00+01:60",
+		"2019-01-01T12:00:00+24:00",
+	}
+
+	saved := time.Local
+	t.Cleanup(func() { time.Local = saved })
+	for _, name := range []string{"UTC", "Africa/Casablanca", "America/Sao_Paulo", "Europe/Berlin", "America/Los_Angeles", "America/New_York"} {
+		loc, err := time.LoadLocation(name)
 		if err != nil {
-			t.Fatalf("net/mail: %q: %v", value, err)
+			t.Fatal(err)
 		}
-		got, err := parseDateHeader(value)
-		if err != nil {
-			t.Fatalf("%q: %v", value, err)
-		}
-		_, wantOffset := want.Zone()
-		_, gotOffset := got.Zone()
-		if !got.Equal(want) || gotOffset != wantOffset {
-			t.Errorf("%q: %v, want %v", value, got, want)
+		time.Local = loc // no test in this package runs in parallel
+		for _, value := range values {
+			if got, err := parseDateHeader(value); err == nil {
+				t.Errorf("TZ=%s %q: parsed invalid date as %v", name, value, got)
+			}
 		}
 	}
 }
@@ -302,7 +357,6 @@ func TestParseDateHeaderLeapSecond(t *testing.T) {
 		{"Sat, 31 Dec 2016 23:59:60 GMT", leap, 0},
 		{"Sat, 31 Dec 2016 23:59:60 UT (leap second)", leap, 0},
 		{"Sat, 31 Dec 2016 15:59:60 PST", leap, -8 * h},
-		{"Sat, 31 Dec 2016 23:59:60 GMT+0000", leap, 0},
 		{"31 Dec 2016 23:59:60 +0000", leap, 0},
 		{"Sat, 31 Dec 2016 23:59:60\r\n +0000", leap, 0},
 		{"Tue, 30 Jun 2015 23:59:60 +0000", time.Date(2015, 6, 30, 23, 59, 59, 0, time.UTC), 0},
