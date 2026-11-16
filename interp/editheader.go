@@ -6,13 +6,18 @@ import (
 	"strings"
 )
 
-// HeaderEdit represents a header modification (add or delete)
+// HeaderEdit represents a header modification (add or delete).
+//
+// A delete removes fields named FieldName: with Index above 0 the one Index
+// counts to, from 1 (from the last with Last); else with ByValue the first
+// whose value is Value, which may be empty; else every one of them.
 type HeaderEdit struct {
 	Action    string // "add" or "delete"
 	FieldName string
 	Value     string
 	Last      bool // for addheader: add at end; for deleteheader: count from end
-	Index     int  // for deleteheader: specific index (0 means all)
+	Index     int  // for deleteheader: the field to delete, counted from 1, or 0
+	ByValue   bool // for deleteheader: select the field by Value, even an empty one
 }
 
 // protectedHeaders are headers that MUST NOT be deleted per RFC 5293
@@ -188,6 +193,7 @@ func (c CmdDeleteHeader) Execute(ctx context.Context, d *RuntimeData) error {
 				Action:    "delete",
 				FieldName: fieldName,
 				Value:     val,
+				ByValue:   true,
 			})
 		}
 	}
@@ -253,8 +259,8 @@ func applyHeaderEditsToValues(d *RuntimeData, fieldName string, values []string)
 				if idx >= 0 && idx < len(result) {
 					result = append(result[:idx], result[idx+1:]...)
 				}
-			} else if edit.Value != "" {
-				// Delete by value
+			} else if edit.ByValue {
+				// Delete by value, which may be empty
 				newResult := make([]string, 0, len(result))
 				deleted := false
 				for _, v := range result {

@@ -61,6 +61,7 @@ func loadDeleteHeader(s *Script, pcmd parser.Cmd) (Cmd, error) {
 	cmd := CmdDeleteHeader{
 		matcherTest: newMatcherTest(),
 	}
+	indexed := false
 
 	spec := cmd.matcherTest.addSpecTags(&Spec{
 		Tags: map[string]SpecTag{
@@ -68,6 +69,7 @@ func loadDeleteHeader(s *Script, pcmd parser.Cmd) (Cmd, error) {
 				NeedsValue: true,
 				MatchNum: func(val int) {
 					cmd.Index = val
+					indexed = true
 				},
 			},
 			"last": {
@@ -101,8 +103,14 @@ func loadDeleteHeader(s *Script, pcmd parser.Cmd) (Cmd, error) {
 	}
 
 	// Per RFC 5293: :last MUST only be specified with :index
-	if cmd.Last && cmd.Index == 0 {
+	if cmd.Last && !indexed {
 		return nil, parser.ErrorAt(pcmd.Position, ":last can only be specified with :index")
+	}
+	// RFC 5293 §5 counts the named fields "beginning at 1, the first named
+	// header field". Index 0 would otherwise read as no :index, deleting
+	// every field of the name; the index extension refuses it too.
+	if indexed && cmd.Index < 1 {
+		return nil, parser.ErrorAt(pcmd.Position, ":index must be 1 or more")
 	}
 
 	// RFC 5293 §5: "If no value-patterns are specified, then the comparator

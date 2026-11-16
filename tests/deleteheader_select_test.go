@@ -1,8 +1,14 @@
 package tests
 
 import (
+	"context"
+	"net/textproto"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/migadu/go-sieve"
+	"github.com/migadu/go-sieve/interp"
 )
 
 // RFC 5293 §5: "The value-patterns, if specified, restrict which occurrences
@@ -61,6 +67,36 @@ if not header :is "x-foo" "added" {
 		t.Run(tc.name, func(t *testing.T) {
 			RunDovecotTestInline(t, "", head+"test \"deleteheader\" {"+tc.test+"\n}\n")
 		})
+	}
+}
+
+// TestDeleteHeaderEditSelectsByValue covers the edit a caller applies to the
+// message it stores: a field selected by its value, the empty one included,
+// is marked ByValue, and a deletion without value-patterns is not.
+func TestDeleteHeaderEditSelectsByValue(t *testing.T) {
+	opts := sieve.DefaultOptions()
+	opts.EnabledExtensions = []string{"editheader"}
+	script, err := sieve.Load(strings.NewReader(`require "editheader";
+deleteheader :is "X-Foo" "";
+deleteheader "X-Bar";
+`), opts)
+	if err != nil {
+		t.Fatalf("Failed to load script: %v", err)
+	}
+	header := make(textproto.MIMEHeader)
+	header["X-Foo"] = []string{"", "keep"}
+	header["X-Bar"] = []string{""}
+	env := interp.EnvelopeStatic{From: "sender@example.com", To: "recipient@example.com"}
+	data := sieve.NewRuntimeData(script, interp.DummyPolicy{}, env, interp.MessageStatic{Header: header})
+	if err := script.Execute(context.Background(), data); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := []interp.HeaderEdit{
+		{Action: "delete", FieldName: "X-Foo", Value: "", ByValue: true},
+		{Action: "delete", FieldName: "X-Bar"},
+	}
+	if !reflect.DeepEqual(data.HeaderEdits, want) {
+		t.Errorf("edits = %+v, want %+v", data.HeaderEdits, want)
 	}
 }
 
