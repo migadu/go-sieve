@@ -8,19 +8,9 @@ import (
 	_ "time/tzdata" // the zones the test runs in, on hosts without zoneinfo
 )
 
-// The date test (RFC 5260 §4) reads a Date: header whose zone is neither a
-// numeric zone nor a name (RFC 5322 §3.3: zone = (FWS ( "+" / "-" ) 4DIGIT) /
-// obs-zone) with the time of day as written and the zone "-0000", whatever
-// zone the server runs in. RFC 5322 §4.3 has a name "whose meaning is not
-// known" be "considered equivalent to "-0000"", and RFC 5256 §2.2 says "If the
-// time zone is invalid, the date and time SHOULD be treated as UTC." RFC 5260
-// §4.2 writes that zone with a positive sign ("An offset of 0 (Zulu) always has
-// a positive sign") and its iso8601 date-part with "Z" ("a time zone offset of
-// zero MUST be represented by "Z" and not "+00:00"").
-//
-// 12:00:00 GMT+1 was read as 13:00:00 +0100; +01 and CET/CEST were read by the
-// server's zone; GMT+0200, UTC-0500 and PDT+0400 were not dates at all.
-// Letters before a numeric offset after white space are still not a date.
+// The date test rejects malformed zone syntax instead of recovering it as
+// UTC (RFC 5260 section 4). Known obsolete and unknown alphabetic names remain
+// accepted according to RFC 5322 section 4.3, independently of the host's zone.
 func TestDateMalformedZone(t *testing.T) {
 	var script strings.Builder
 	script.WriteString(`
@@ -42,24 +32,18 @@ Test.
 .
 ;
 
-test "%[1]s is -0000" {
-	if not date :count "eq" :comparator "i;ascii-numeric" "date" "year" "1" {
-		test_fail "not a date";
+test "%[1]s is invalid" {
+	if not date :count "eq" :comparator "i;ascii-numeric" "date" "year" "0" {
+		test_fail "malformed zone counted as a date";
 	}
-	if not date :originalzone "date" "hour" "12" {
-		test_fail "original hour is not 12";
+	if date :originalzone "date" "hour" "12" {
+		test_fail "malformed zone matched original hour";
 	}
-	if not date :originalzone "date" "zone" "+0000" {
-		test_fail "original zone is not +0000";
+	if date :originalzone "date" "zone" "+0000" {
+		test_fail "malformed zone matched UTC";
 	}
-	if not date :originalzone "date" "iso8601" "2019-01-01T12:00:00Z" {
-		test_fail "original iso8601 is not 2019-01-01T12:00:00Z";
-	}
-	if not date :originalzone "date" "std11" "Tue, 01 Jan 2019 12:00:00 +0000" {
-		test_fail "original std11 is not Tue, 01 Jan 2019 12:00:00 +0000";
-	}
-	if not date :zone "+0100" "date" "time" "13:00:00" {
-		test_fail "not 13:00:00 in +0100";
+	if date :zone "+0100" "date" "time" "13:00:00" {
+		test_fail "malformed zone was shifted as UTC";
 	}
 }
 `, zone)
