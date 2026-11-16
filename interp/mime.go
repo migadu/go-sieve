@@ -1,12 +1,11 @@
 package interp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime"
-	"net/textproto"
 	"strings"
 
 	"github.com/emersion/go-message"
@@ -25,8 +24,8 @@ const (
 // changes apply) rather than stored here.
 type mimePart struct {
 	root     bool
-	header   textproto.MIMEHeader // sub-parts only
-	body     []byte               // raw, still transfer-encoded
+	header   partHeader // sub-parts only
+	body     []byte     // raw, still transfer-encoded
 	children []*mimePart
 
 	// extracttext's view of the part, computed once per evaluation.
@@ -163,7 +162,7 @@ func buildMIMEChildren(p *mimePart, contentType string, body []byte, depth int, 
 			hdr, partBody, err := parsePartHeader(raw)
 			if err != nil {
 				// Unparseable header: an opaque leaf holding everything.
-				hdr, partBody = textproto.MIMEHeader{}, raw
+				hdr, partBody = nil, raw
 			}
 			child := &mimePart{header: hdr, body: partBody}
 			p.children = append(p.children, child)
@@ -289,21 +288,112 @@ func delimiterEnds(b []byte, end int) bool {
 	return false
 }
 
+// partHeader holds a MIME part's header fields: their values in the order the
+// fields appear, keyed by the field name folded under i;ascii-casemap, which
+// header names always compare with (RFC 5228 §2.7). "X(a" and "x(A" name one
+// field.
+type partHeader map[string][]string
+
+// Values returns the values of the fields named name.
+func (h partHeader) Values(name string) []string {
+	return h[lowerASCII(name)]
+}
+
+// Get returns the value of the first field named name, or "".
+func (h partHeader) Get(name string) string {
+	if values := h.Values(name); len(values) > 0 {
+		return values[0]
+	}
+	return ""
+}
+
+var errMalformedPartHeader = errors.New("malformed MIME part header")
+
 // parsePartHeader splits a MIME part into its header and body. The body is
-// what follows the blank line the header reader stopped at, so a part with no
-// header fields (RFC 2046 §5.1 allows one) still yields its body; it is nil
-// when the part has no blank line at all.
-func parsePartHeader(p []byte) (textproto.MIMEHeader, []byte, error) {
-	br := bytes.NewReader(p)
-	buf := bufio.NewReader(br)
-	hdr, err := textproto.NewReader(buf).ReadMIMEHeader()
-	if err != nil && err != io.EOF {
-		return nil, nil, err
+// what follows the blank line that ends the header, so a part with no header
+// fields (RFC 2046 §5.1 allows one) still yields its body; it is nil when the
+// part has no blank line at all.
+//
+// The fields are read as RFC 5322 defines them, which MIME part headers share
+// (RFC 2045 §3), and not as net/textproto reads HTTP's: a name may hold any
+// ftext octet ("(", "/", "@", ..., §3.6.8), white space may stand before the
+// colon (§4.5.8), and a value may hold control octets (§4.1). The name is
+// otherwise taken as written, and a field with an empty name is dropped. Only a
+// line with no colon, or folding white space before the first field, makes the
+// header malformed.
+func parsePartHeader(p []byte) (partHeader, []byte, error) {
+	hdr := partHeader{}
+	var (
+		name    string // the field being read, "" for one without a name
+		value   []byte // its value so far, unfolded
+		inField bool
+	)
+	endField := func() {
+		if name != "" {
+			hdr[name] = append(hdr[name], string(value))
+		}
 	}
-	if err == io.EOF {
-		return hdr, nil, nil
+	for rest := p; len(rest) > 0; {
+		line := rest
+		if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+			line, rest = rest[:i], rest[i+1:]
+		} else {
+			rest = nil
+		}
+		line = bytes.TrimSuffix(line, []byte("\r"))
+		switch {
+		case len(line) == 0:
+			endField()
+			return hdr, rest, nil
+		case line[0] == ' ' || line[0] == '\t':
+			if !inField {
+				return nil, nil, errMalformedPartHeader
+			}
+			value = appendUnfolded(value, line)
+		default:
+			endField()
+			colon := bytes.IndexByte(line, ':')
+			if colon < 0 {
+				return nil, nil, errMalformedPartHeader
+			}
+			name = lowerASCII(string(bytes.TrimRight(line[:colon], " \t")))
+			value = appendUnfolded(value[:0], line[colon+1:])
+			inField = true
+		}
 	}
-	return hdr, p[len(p)-buf.Buffered()-br.Len():], nil
+	endField()
+	return hdr, nil, nil
+}
+
+// appendUnfolded appends one line of a field's value to value as net/textproto
+// and go-message join the lines of a folded value: white space around the line
+// is dropped and one space separates it from the line before.
+func appendUnfolded(value, line []byte) []byte {
+	line = bytes.Trim(line, " \t")
+	if len(line) == 0 {
+		return value
+	}
+	if len(value) > 0 {
+		value = append(value, ' ')
+	}
+	return append(value, line...)
+}
+
+// lowerASCII lowers the US-ASCII letters of s and leaves every other octet as
+// it is: i;ascii-casemap "treats US-ASCII letters case-insensitively", and
+// "letters outside ASCII are not treated case-insensitively" (RFC 4790
+// §9.2.1).
+func lowerASCII(s string) string {
+	for i := 0; i < len(s); i++ {
+		if 'A' <= s[i] && s[i] <= 'Z' {
+			b := []byte(s)
+			for ; i < len(b); i++ {
+				b[i] = foldASCII(b[i])
+			}
+			return string(b)
+		}
+	}
+	return s
 }
 
 // decodeInputLimit is how many octets of a decoded part are read for matching
