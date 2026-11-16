@@ -77,6 +77,14 @@ func TestParsePartHeader(t *testing.T) {
 			fields: map[string][]string{"Content-Type": {"text/plain"}}, body: ptr("body")},
 		{name: "folded value", in: "Subject: a\r\n b \r\n\tc\r\n\r\n",
 			fields: map[string][]string{"subject": {"a b c"}}, body: ptr("")},
+		{name: "blank fold in the middle", in: "Subject: a\r\n \r\n b\r\n\r\n",
+			fields: map[string][]string{"subject": {"a  b"}}, body: ptr("")},
+		{name: "blank fold at the end", in: "Subject: a\r\n \r\n\r\n",
+			fields: map[string][]string{"subject": {"a "}}, body: ptr("")},
+		{name: "multiple blank folds", in: "Subject: a\r\n \r\n\t\r\n b\r\n\r\n",
+			fields: map[string][]string{"subject": {"a   b"}}, body: ptr("")},
+		{name: "blank folds after an empty value", in: "Subject:\r\n \r\n\t\r\n b\r\n\r\n",
+			fields: map[string][]string{"subject": {"b"}}, body: ptr("")},
 		{name: "empty value", in: "X-A:\r\n\r\nx",
 			fields: map[string][]string{"x-a": {""}}, body: ptr("x")},
 		{name: "no header fields", in: "\r\nbody",
@@ -143,4 +151,15 @@ func equalPartHeaderValues(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// Obsolete folding white space may contain whitespace-only physical lines.
+// Each contributes an unfolded separator, as the previous header parser did.
+func TestPartHeaderWhitespaceOnlyFolds(t *testing.T) {
+	hdr := textproto.MIMEHeader{"Content-Type": {`multipart/mixed; boundary="b"`}}
+	body := multipart("b", "Subject: a\r\n \r\n b\r\n\r\ntext")
+	data := runOn(t, `require ["mime", "fileinto"]; if header :mime :anychild :is "Subject" "a  b" { fileinto "hit"; }`, hdr, body)
+	if got := strings.Join(data.Mailboxes, ","); got != "hit" {
+		t.Fatalf("folded part header filed into %q, want hit", got)
+	}
 }

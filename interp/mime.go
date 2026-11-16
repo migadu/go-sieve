@@ -370,9 +370,6 @@ func parsePartHeader(p []byte) (partHeader, []byte, error) {
 // is dropped and one space separates it from the line before.
 func appendUnfolded(value, line []byte) []byte {
 	line = bytes.Trim(line, " \t")
-	if len(line) == 0 {
-		return value
-	}
 	if len(value) > 0 {
 		value = append(value, ' ')
 	}
