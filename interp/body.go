@@ -194,11 +194,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		} else {
 			if process {
 				// The part is decoded by the two fields the walk read.
-				var h message.Header
-				h.Set("Content-Type", contentType)
-				if cte != "" {
-					h.Set("Content-Transfer-Encoding", cte)
-				}
+				h := decodingHeader(contentType, cte)
 				if t.isCount() {
 					// The content is not needed, but a part that cannot be
 					// decoded is not counted, as it is not matched.

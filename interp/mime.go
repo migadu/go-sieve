@@ -83,11 +83,7 @@ func (p *mimePart) decodeText(d *RuntimeData, limit int64) string {
 	if contentType == "" {
 		contentType = "text/plain; charset=us-ascii"
 	}
-	var h message.Header
-	h.Set("Content-Type", contentType)
-	if cte := p.firstHeader(d, "Content-Transfer-Encoding"); cte != "" {
-		h.Set("Content-Transfer-Encoding", cte)
-	}
+	h := decodingHeader(contentType, p.firstHeader(d, "Content-Transfer-Encoding"))
 	entity, err := message.New(h, bytes.NewReader(p.body))
 	if err != nil {
 		return ""
@@ -187,17 +183,42 @@ func buildMIMEChildren(p *mimePart, contentType string, body []byte, depth int, 
 // type itself still tests. The media type is lower-cased; "" means the value
 // did not parse at all.
 func parseMediaTypeLenient(v string) (string, map[string]string) {
-	mediaType, params, err := mime.ParseMediaType(v)
-	if err == nil {
+	if _, mediaType, params, ok := parseMediaTypeRetry(v); ok {
 		return mediaType, params
-	}
-	if trimmed := strings.TrimRight(strings.TrimSpace(v), "; \t"); trimmed != v {
-		if mediaType, params, err = mime.ParseMediaType(trimmed); err == nil {
-			return mediaType, params
-		}
 	}
 	base, _, _ := strings.Cut(v, ";")
 	return strings.ToLower(strings.TrimSpace(base)), map[string]string{}
+}
+
+// parseMediaTypeRetry parses v with mime.ParseMediaType and, when that fails,
+// once more without trailing semicolons and white space, which it rejects
+// past a single ";". It returns the form of v that parsed, or v when neither
+// did.
+func parseMediaTypeRetry(v string) (parsed, mediaType string, params map[string]string, ok bool) {
+	if mediaType, params, err := mime.ParseMediaType(v); err == nil {
+		return v, mediaType, params, true
+	}
+	if trimmed := strings.TrimRight(strings.TrimSpace(v), "; \t"); trimmed != v {
+		if mediaType, params, err := mime.ParseMediaType(trimmed); err == nil {
+			return trimmed, mediaType, params, true
+		}
+	}
+	return v, "", nil, false
+}
+
+// decodingHeader is the header a leaf part is decoded by (message.New): its
+// Content-Type and Content-Transfer-Encoding. go-message parses Content-Type
+// with mime.ParseMediaType alone, so it is given the form
+// parseMediaTypeLenient parsed: the body test and extracttext then decode a
+// part by the charset the :mime tests read.
+func decodingHeader(contentType, cte string) message.Header {
+	parsed, _, _, _ := parseMediaTypeRetry(contentType)
+	var h message.Header
+	h.Set("Content-Type", parsed)
+	if cte != "" {
+		h.Set("Content-Transfer-Encoding", cte)
+	}
+	return h
 }
 
 // splitMultipart splits a multipart body at its boundary delimiters. It
