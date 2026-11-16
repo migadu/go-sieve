@@ -2,7 +2,6 @@ package interp
 
 import (
 	"net/textproto"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -115,7 +114,7 @@ func TestParsePartHeader(t *testing.T) {
 				t.Fatalf("%q: %v", tc.in, err)
 			}
 			for name, want := range tc.fields {
-				if got := hdr.Values(name); !slices.Equal(got, want) {
+				if got := hdr.Values(name); !equalPartHeaderValues(got, want) {
 					t.Errorf("%q: %q = %q, want %q", tc.in, name, got, want)
 				}
 			}
@@ -132,3 +131,16 @@ func TestParsePartHeader(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// Compare values without distinguishing nil from an empty list.
+func equalPartHeaderValues(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
