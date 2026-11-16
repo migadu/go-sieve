@@ -190,15 +190,11 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		} else {
 			if process {
 				// The part is decoded by the two fields the walk read.
-				var h message.Header
-				h.Set("Content-Type", contentType)
-				if cte != "" {
-					h.Set("Content-Transfer-Encoding", cte)
-				}
+				h := decodingHeader(contentType, cte)
 				if t.isCount() {
 					// The content is not needed, but a part that cannot be
 					// decoded is not counted, as it is not matched.
-					if _, err := message.New(h, bytes.NewReader(b)); err != nil && !message.IsUnknownCharset(err) {
+					if _, err := newBodyEntity(h, cte, b); err != nil && !message.IsUnknownCharset(err) {
 						return false, nil
 					}
 					count++
@@ -207,7 +203,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 					// charset, then HTML to text for :text), never held whole.
 					// An unknown charset is not fatal: the part is still
 					// readable and matching raw octets beats skipping it.
-					entity, err := message.New(h, bytes.NewReader(b))
+					entity, err := newBodyEntity(h, cte, b)
 					if err != nil && !message.IsUnknownCharset(err) {
 						return false, nil // RFC 5173: skip if text cannot be decoded
 					}
@@ -242,4 +238,20 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// newBodyEntity retains transfer-decoding errors even when the charset is also
+// unknown. go-message reports only the charset error in that case; tolerating
+// it would otherwise match and count a part whose transfer encoding cannot be
+// decoded. Check that encoding alone before applying the raw-charset fallback.
+func newBodyEntity(h message.Header, cte string, body []byte) (*message.Entity, error) {
+	entity, err := message.New(h, bytes.NewReader(body))
+	if message.IsUnknownCharset(err) {
+		var transferHeader message.Header
+		transferHeader.Set("Content-Transfer-Encoding", cte)
+		if _, transferErr := message.New(transferHeader, bytes.NewReader(nil)); transferErr != nil {
+			return entity, transferErr
+		}
+	}
+	return entity, err
 }
