@@ -71,7 +71,7 @@ func extractDatePart(t time.Time, part DatePart) (string, error) {
 	case DatePartISO8601:
 		// RFC 3339 date-time, with a zero offset as "Z" and not "+00:00"
 		// (RFC 5260 §4.2).
-		return t.Format("2006-01-02T15:04:05Z07:00"), nil
+		return iso8601Time(t).Format("2006-01-02T15:04:05Z07:00"), nil
 	case DatePartStd11:
 		// RFC 2822/5322 format (originally from RFC 822)
 		return t.Format(time.RFC1123Z), nil
@@ -83,6 +83,18 @@ func extractDatePart(t time.Time, part DatePart) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown date-part: %s", part)
 	}
+}
+
+// iso8601Time preserves the instant when an RFC 5322 header or :zone offset
+// cannot be represented by RFC 3339's 00..23 offset hour (RFC 5260 section 4.2).
+// Only the ISO rendering changes; zone, wall-clock and std11 parts retain the
+// selected original/explicit zone. Leap-second rendering still overrides 59.
+func iso8601Time(t time.Time) time.Time {
+	_, offset := t.Zone()
+	if offset <= -24*60*60 || offset >= 24*60*60 {
+		return t.UTC()
+	}
+	return t
 }
 
 // modifiedJulianDay calculates the Modified Julian Day for a given time.
@@ -615,6 +627,7 @@ func extractHeaderDatePart(t time.Time, part DatePart, isLeapSecond bool) (strin
 		case DatePartTime:
 			return t.Format("15:04") + ":60", nil
 		case DatePartISO8601:
+			t = iso8601Time(t)
 			return t.Format("2006-01-02T15:04") + ":60" + t.Format("Z07:00"), nil
 		case DatePartStd11:
 			return t.Format("Mon, 02 Jan 2006 15:04") + ":60 " + t.Format("-0700"), nil
