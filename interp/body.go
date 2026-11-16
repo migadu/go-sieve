@@ -42,21 +42,19 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		return t.matchStream(ctx, d, bytes.NewReader(rawBody))
 	}
 
-	// For :text and :content, we need to parse the MIME structure.
-	var hdr message.Header
+	// For :text and :content, we need to parse the MIME structure. The
+	// message and each part are read by their first Content-Type and
+	// Content-Transfer-Encoding fields, as the mime extension reads them
+	// (mimePart.firstHeader), so a repeated field does not give the body test
+	// one view of a part and the :mime tests and extracttext another.
+	contentType, cte := "text/plain; charset=us-ascii", ""
 	if vals, err := d.Msg.HeaderGet("Content-Type"); err == nil && len(vals) > 0 {
-		for _, v := range vals {
-			hdr.Add("Content-Type", v)
-		}
-	} else {
-		hdr.Set("Content-Type", "text/plain; charset=us-ascii")
+		contentType = vals[0]
 	}
 	// Single-part messages carry their transfer encoding in the top-level
 	// header; without it the body would be matched still encoded.
-	if vals, err := d.Msg.HeaderGet("Content-Transfer-Encoding"); err == nil {
-		for _, v := range vals {
-			hdr.Add("Content-Transfer-Encoding", v)
-		}
+	if vals, err := d.Msg.HeaderGet("Content-Transfer-Encoding"); err == nil && len(vals) > 0 {
+		cte = vals[0]
 	}
 
 	// RFC 5173 §6: "variable references in the key strings or content type
@@ -64,14 +62,13 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 	contentTypes := expandVarsList(d, t.content)
 
 	count := uint64(0)
-	var walk func(h message.Header, b []byte) (bool, error)
-	walk = func(h message.Header, b []byte) (bool, error) {
+	var walk func(contentType, cte string, b []byte) (bool, error)
+	walk = func(contentType, cte string, b []byte) (bool, error) {
 		// Honour the script execution deadline while descending the MIME tree.
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
 
-		contentType := h.Get("Content-Type")
 		if contentType == "" {
 			contentType = "text/plain; charset=us-ascii"
 		}
@@ -156,14 +153,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 					continue
 				}
 
-				mh := message.Header{}
-				for k, vv := range partHdr {
-					for _, v := range vv {
-						mh.Add(k, v)
-					}
-				}
-
-				match, err := walk(mh, partBody)
+				match, err := walk(partHdr.Get("Content-Type"), partHdr.Get("Content-Transfer-Encoding"), partBody)
 				if err != nil {
 					return false, err
 				}
@@ -196,13 +186,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			}
 
 			if err == nil {
-				mh := message.Header{}
-				for k, vv := range nestedHdr {
-					for _, v := range vv {
-						mh.Add(k, v)
-					}
-				}
-				match, err := walk(mh, nestedBody)
+				match, err := walk(nestedHdr.Get("Content-Type"), nestedHdr.Get("Content-Transfer-Encoding"), nestedBody)
 				if err != nil {
 					return false, err
 				}
@@ -212,6 +196,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 			}
 		} else {
 			if process {
+				// The part is decoded by the two fields the walk read.
+				var h message.Header
+				h.Set("Content-Type", contentType)
+				if cte != "" {
+					h.Set("Content-Transfer-Encoding", cte)
+				}
 				if t.isCount() {
 					// The content is not needed, but a part that cannot be
 					// decoded is not counted, as it is not matched.
@@ -246,7 +236,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 		return false, nil
 	}
 
-	match, err := walk(hdr, rawBody)
+	match, err := walk(contentType, cte, rawBody)
 	if err != nil {
 		return false, err
 	}
