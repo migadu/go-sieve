@@ -109,6 +109,9 @@ func TestParseDateHeaderCFWS(t *testing.T) {
 		{"Wed, 17 Jul 1996 02:23:25 (quoted\\\x00) -0700", -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25 -0700 (quoted\\\nLF)", -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25 -0700 (quoted\\\rCR)", -7 * h},
+		// Folding is removed before quoted-pair interpretation (section 2.2.3).
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (foldpair\\\r\n space)", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700 (foldpair\\\r\n\ttab)", -7 * h},
 		// A comment holding the characters the zone and the time are found by.
 		{"Wed, 17 Jul 1996 02:23:25 (UTC-7) PDT", -7 * h},
 		{"(Wed: 17 Jul) Wed, 17 Jul 1996 02:23:25 PDT", -7 * h},

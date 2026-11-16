@@ -377,6 +377,11 @@ func commentLen(s string) int {
 			i++ // consume the LF of this valid fold
 		case '\\':
 			i++
+			if isDateFold(s, i) {
+				// Unfold first: the pair quotes the white space after CRLF,
+				// rather than a CR followed by an unpaired LF.
+				i += 2
+			}
 		case '(':
 			depth++
 		case ')':
