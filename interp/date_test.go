@@ -119,6 +119,8 @@ func TestParseDateHeaderCFWS(t *testing.T) {
 		{"Wed,\t17\tJul\t1996\t02:23:25\t-0700", -7 * h},
 		{"Wed,   17  Jul   1996  02:23:25    PDT", -7 * h},
 		{"Wed, 17 Jul 1996 02:23:25\r\n (c)\r\n\t-0700", -7 * h},
+		{"\r\n \r\n\tWed, 17 Jul 1996 02:23:25 -0700\r\n \r\n\t", -7 * h},
+		{"Wed, 17 Jul 1996 02:23:25 -0700\r\n \r\n", -7 * h},
 		// day = ([FWS] 1*2DIGIT FWS): the white space after the comma is optional.
 		{"Wed,17 Jul 1996 02:23:25 -0700", -7 * h},
 		{"Wed,(c)17 Jul 1996 02:23:25 +0530", 5*h + 30*60},
@@ -199,9 +201,12 @@ func TestParseDateHeaderObsoleteYear(t *testing.T) {
 func TestParseDateHeaderInvalid(t *testing.T) {
 	for _, value := range []string{
 		"", "PDT", "Wed, 17 Jul 1996 PDT", "not a date 12:00 PDT",
-		// An unpaired CR or LF is not folding white space.
+		// An unpaired CR or LF, or a doubled CRLF, is not folding white space.
 		"Wed, 17 Jul 1996 02:23:25\r PDT",
 		"Wed, 17 Jul 1996 02:23:25\n PDT",
+		"Wed, 17 Jul 1996 02:23:25 -0700\r\n\r\n",
+		"from mx.example by mail.example; Wed, 17 Jul 1996 02:23:25 -0700\r\n\r\n",
+		"Wed, 17 Jul 1996 02:23:25 -0700\r\n\r\n ",
 		// NUL is not comment text (ctext or obs-ctext), so removing a
 		// malformed comment must not turn a previously invalid value into a date.
 		"Wed, 17 Jul 1996 02:23:25 (bad\x00) -0700",
