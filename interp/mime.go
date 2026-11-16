@@ -162,10 +162,7 @@ func buildMIMEChildren(p *mimePart, contentType string, body []byte, depth int, 
 			buildMIMEChildren(child, hdr.Get("Content-Type"), partBody, depth+1, count)
 		}
 	case mediaType == "message/rfc822":
-		hdr, nested, err := parsePartHeader(body)
-		if err != nil {
-			return
-		}
+		hdr, nested := readBodyPart(body)
 		child := &mimePart{header: hdr, body: nested}
 		p.children = append(p.children, child)
 		*count++
@@ -324,13 +321,15 @@ func (h partHeader) Get(name string) string {
 	return ""
 }
 
-// readBodyPart splits one body part of a multipart into its header and body.
-// A part whose header does not parse is still a part: the body test searches
-// "All MIME parts with matching types" (RFC 5173 §5.2) and foreverypart
-// "walks though every MIME part of a message" (RFC 5703 §3). It is read as a
-// leaf with no header fields holding the whole part, header lines included,
-// so its type is the text/plain default (RFC 2045 §5.2). The body test and
-// the MIME tree both read parts here, so they see the same parts.
+// readBodyPart splits one body part of a multipart, or the message a
+// message/rfc822 part holds, into its header and body. A part whose header
+// does not parse is still a part: the body test searches "All MIME parts with
+// matching types" and "descends into multipart and message/rfc822 MIME parts"
+// (RFC 5173 §5.2), and foreverypart "walks though every MIME part of a
+// message, including nested parts" (RFC 5703 §3). It is read as a leaf with no
+// header fields holding the whole part, header lines included, so its type is
+// the text/plain default (RFC 2045 §5.2). The body test and the MIME tree both
+// read parts here, so they see the same parts.
 func readBodyPart(raw []byte) (partHeader, []byte) {
 	hdr, body, err := parsePartHeader(raw)
 	if err != nil {

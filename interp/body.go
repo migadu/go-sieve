@@ -155,8 +155,10 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				}
 			}
 		} else if mediaType == "message/rfc822" {
-			// RFC 5173: match against the header of the nested message
-			nestedHdr, nestedBody, err := parsePartHeader(b)
+			// RFC 5173: match against the header of the nested message. A
+			// nested header that does not parse leaves no header fields, so
+			// the header searched is empty and the whole message is its body.
+			nestedHdr, nestedBody := readBodyPart(b)
 
 			// The header block as it appears, without the blank line.
 			hdrBytes := b
@@ -178,14 +180,12 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 				}
 			}
 
-			if err == nil {
-				match, err := walk(nestedHdr.Get("Content-Type"), nestedHdr.Get("Content-Transfer-Encoding"), nestedBody)
-				if err != nil {
-					return false, err
-				}
-				if match {
-					return true, nil
-				}
+			match, err := walk(nestedHdr.Get("Content-Type"), nestedHdr.Get("Content-Transfer-Encoding"), nestedBody)
+			if err != nil {
+				return false, err
+			}
+			if match {
+				return true, nil
 			}
 		} else {
 			if process {
