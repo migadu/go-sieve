@@ -10,7 +10,9 @@ import (
 //
 // A delete removes fields named FieldName: with Index above 0 the one Index
 // counts to, from 1 (from the last with Last); else with ByValue the first
-// whose value is Value, which may be empty; else every one of them.
+// whose value is Value, which may be empty; else a nonempty Value also selects
+// the first matching field, for compatibility with edits predating ByValue;
+// else every one of them.
 type HeaderEdit struct {
 	Action    string // "add" or "delete"
 	FieldName string
@@ -259,7 +261,7 @@ func applyHeaderEditsToValues(d *RuntimeData, fieldName string, values []string)
 				if idx >= 0 && idx < len(result) {
 					result = append(result[:idx], result[idx+1:]...)
 				}
-			} else if edit.ByValue {
+			} else if edit.ByValue || edit.Value != "" {
 				// Delete by value, which may be empty
 				newResult := make([]string, 0, len(result))
 				deleted := false
