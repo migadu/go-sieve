@@ -145,11 +145,7 @@ func (t *TestBody) Check(ctx context.Context, d *RuntimeData) (bool, error) {
 
 			// Descend into nested parts
 			for _, p := range nested {
-				partHdr, partBody, err := parsePartHeader(p)
-				if err != nil {
-					continue
-				}
-
+				partHdr, partBody := readBodyPart(p)
 				match, err := walk(partHdr.Get("Content-Type"), partHdr.Get("Content-Transfer-Encoding"), partBody)
 				if err != nil {
 					return false, err
