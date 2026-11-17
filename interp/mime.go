@@ -396,9 +396,10 @@ func parsePartHeader(p []byte) (partHeader, []byte, error) {
 	return hdr, nil, nil
 }
 
-// appendUnfolded appends one line of a field's value to value as net/textproto
-// and go-message join the lines of a folded value: white space around the line
-// is dropped and one space separates it from the line before.
+// appendUnfolded uses net/textproto's unfolding convention: trim surrounding
+// SP/HTAB and, once the value is nonempty, contribute one separator per physical
+// continuation, including whitespace-only lines. go-message collapses those
+// whitespace-only lines and can therefore produce different values.
 func appendUnfolded(value, line []byte) []byte {
 	line = bytes.Trim(line, " \t")
 	if len(value) > 0 {
