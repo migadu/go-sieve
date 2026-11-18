@@ -106,9 +106,11 @@ func (c CmdVacation) Execute(ctx context.Context, d *RuntimeData) error {
 		return nil
 	}
 
-	// Check if the sender is in the list of "my" addresses
+	// Check if the sender is in the list of "my" addresses. The comparison ignores
+	// case: the sender may come with the case it was sent in (RFC 5321 §2.4), and
+	// Me@example.com is still the user's own me@example.com (#61).
 	for _, addr := range addresses {
-		if addr == sender {
+		if strings.EqualFold(addr, sender) {
 			// Don't send autoresponse to our own addresses
 			return nil
 		}
