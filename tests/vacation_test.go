@@ -148,6 +148,20 @@ func TestVacation(t *testing.T) {
 			expectResponse: false,
 		},
 		{
+			// An own address is the same address in any case (#61): a server may hand
+			// over the envelope sender with the case it was sent in (RFC 5321 §2.4).
+			name:           "NoVacationResponseToOwnAddressInOtherCase",
+			script:         `require ["vacation"]; vacation :addresses ["me@example.com"] "Away.";`,
+			envFrom:        "Me@example.com",
+			expectResponse: false,
+		},
+		{
+			name:           "NoVacationResponseToOwnAddressWrittenInOtherCase",
+			script:         `require ["vacation"]; vacation :addresses ["ME@Example.COM"] "Away.";`,
+			envFrom:        "me@example.com",
+			expectResponse: false,
+		},
+		{
 			// A null reverse path gets no response (RFC 3834 §2), and the script still
 			// runs, as in Pigeonhole's vacation/smtp.svtest "Null Sender".
 			name:           "NoVacationResponseToNullSender",
